@@ -184,6 +184,23 @@ def test_move_message_from_non_inbox_label_removes_that_label():
     )
 
 
+def test_move_message_never_removes_the_label_it_adds():
+    service = _mock_service()
+    service.users().messages().get().execute.return_value = {
+        "id": "msg-1",
+        "labelIds": ["INBOX", "Promotions"],
+    }
+    provider = GmailProvider(service)
+
+    provider.move_message("msg-1", "Promotions")
+
+    service.users().messages().modify.assert_any_call(
+        userId="me",
+        id="msg-1",
+        body={"addLabelIds": ["Promotions"], "removeLabelIds": ["INBOX"]},
+    )
+
+
 def test_delete_message_calls_trash():
     service = _mock_service()
     provider = GmailProvider(service)

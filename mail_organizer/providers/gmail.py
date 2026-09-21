@@ -132,7 +132,11 @@ class GmailProvider(EmailProvider):
         remove_label_ids = [
             label_id
             for label_id in current.get("labelIds", [])
-            if label_id not in STATE_LABELS and not label_id.startswith("CATEGORY_")
+            # The label being added is never also removed: a message already
+            # filed under target_folder would otherwise appear in both lists.
+            if label_id != target_folder
+            and label_id not in STATE_LABELS
+            and not label_id.startswith("CATEGORY_")
         ]
         self._service.users().messages().modify(
             userId="me",
