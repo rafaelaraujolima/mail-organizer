@@ -1,4 +1,4 @@
-from mail_organizer.heuristics import AuthResult, parse_authentication_results
+from mail_organizer.heuristics import AuthResult, parse_authentication_results, detect_domain_mismatch
 
 
 def test_parses_all_three_mechanisms_when_present():
@@ -34,3 +34,25 @@ def test_missing_mechanism_stays_none():
     result = parse_authentication_results(headers)
 
     assert result == AuthResult(spf="pass", dkim=None, dmarc=None)
+
+
+def test_detects_mismatch_between_sender_and_return_path():
+    headers = {"Return-Path": "<bounce@evil.com>"}
+
+    assert detect_domain_mismatch("victim@bank.com", headers) is True
+
+
+def test_no_mismatch_when_domains_match():
+    headers = {"Return-Path": "<bounce@bank.com>"}
+
+    assert detect_domain_mismatch("victim@bank.com", headers) is False
+
+
+def test_no_mismatch_when_return_path_header_missing():
+    assert detect_domain_mismatch("victim@bank.com", {}) is False
+
+
+def test_no_mismatch_when_sender_has_no_domain():
+    headers = {"Return-Path": "<bounce@evil.com>"}
+
+    assert detect_domain_mismatch("", headers) is False
