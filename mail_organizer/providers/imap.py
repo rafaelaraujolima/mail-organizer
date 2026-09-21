@@ -1,4 +1,5 @@
 import email
+from email.header import decode_header
 from email.message import Message as EmailMessage
 
 from mail_organizer.providers.base import EmailProvider, Message
@@ -26,11 +27,33 @@ class ImapProvider(EmailProvider):
         return Message(
             id=message_id,
             folder="",
-            sender=str(envelope.from_[0]) if envelope.from_ else "",
-            subject=envelope.subject.decode() if envelope.subject else "",
+            sender=self._format_address(envelope.from_[0]) if envelope.from_ else "",
+            subject=self._decode_subject(envelope.subject),
             date=str(envelope.date),
             body_text=self._extract_part(parsed, "text/plain"),
             body_html=self._extract_part(parsed, "text/html"),
+        )
+
+    @staticmethod
+    def _format_address(addr) -> str:
+        if addr is None:
+            return ""
+        mailbox = addr.mailbox.decode() if addr.mailbox else ""
+        host = addr.host.decode() if addr.host else ""
+        if mailbox and host:
+            return f"{mailbox}@{host}"
+        return mailbox or host
+
+    @staticmethod
+    def _decode_subject(subject: bytes | None) -> str:
+        if not subject:
+            return ""
+        decoded_parts = decode_header(subject.decode("ascii", errors="replace"))
+        return "".join(
+            part.decode(encoding or "utf-8", errors="replace")
+            if isinstance(part, bytes)
+            else part
+            for part, encoding in decoded_parts
         )
 
     @staticmethod
