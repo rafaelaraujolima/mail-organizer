@@ -51,3 +51,30 @@ def detect_domain_mismatch(sender: str, headers: dict) -> bool:
         return False
 
     return envelope_domain != sender_domain
+
+
+SHORTENER_DOMAINS = {"bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly"}
+
+
+def extract_links(html: str | None) -> list[str]:
+    if not html:
+        return []
+    return re.findall(r'href=["\']([^"\']+)["\']', html, re.IGNORECASE)
+
+
+def _looks_like_spoof(domain: str, expected_domain: str) -> bool:
+    base = expected_domain.split(".")[0]
+    return base in domain and domain != expected_domain
+
+
+def has_suspicious_links(html: str | None, expected_domain: str | None = None) -> bool:
+    for link in extract_links(html):
+        match = re.match(r"https?://([^/]+)", link, re.IGNORECASE)
+        if not match:
+            continue
+        domain = match.group(1).lower().split(":")[0]
+        if domain in SHORTENER_DOMAINS:
+            return True
+        if expected_domain and domain != expected_domain and _looks_like_spoof(domain, expected_domain):
+            return True
+    return False

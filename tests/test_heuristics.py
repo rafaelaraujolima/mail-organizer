@@ -1,4 +1,10 @@
-from mail_organizer.heuristics import AuthResult, parse_authentication_results, detect_domain_mismatch
+from mail_organizer.heuristics import (
+    AuthResult,
+    parse_authentication_results,
+    detect_domain_mismatch,
+    extract_links,
+    has_suspicious_links,
+)
 
 
 def test_parses_all_three_mechanisms_when_present():
@@ -56,3 +62,36 @@ def test_no_mismatch_when_sender_has_no_domain():
     headers = {"Return-Path": "<bounce@evil.com>"}
 
     assert detect_domain_mismatch("", headers) is False
+
+
+def test_extract_links_finds_href_urls():
+    html = '<a href="https://example.com/a">A</a> <a href="http://x.com">B</a>'
+
+    assert extract_links(html) == ["https://example.com/a", "http://x.com"]
+
+
+def test_extract_links_returns_empty_list_for_empty_html():
+    assert extract_links("") == []
+    assert extract_links(None) == []
+
+
+def test_has_suspicious_links_true_for_url_shortener():
+    html = '<a href="https://bit.ly/abc123">click</a>'
+
+    assert has_suspicious_links(html) is True
+
+
+def test_has_suspicious_links_true_for_lookalike_domain():
+    html = '<a href="https://paypal.com.evil.com/login">login</a>'
+
+    assert has_suspicious_links(html, expected_domain="paypal.com") is True
+
+
+def test_has_suspicious_links_false_for_legitimate_matching_domain():
+    html = '<a href="https://paypal.com/login">login</a>'
+
+    assert has_suspicious_links(html, expected_domain="paypal.com") is False
+
+
+def test_has_suspicious_links_false_for_empty_html():
+    assert has_suspicious_links("") is False
