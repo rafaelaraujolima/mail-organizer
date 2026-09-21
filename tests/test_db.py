@@ -1,4 +1,4 @@
-import json
+import sqlite3
 
 import pytest
 
@@ -9,9 +9,9 @@ from mail_organizer.db import Database
 @pytest.fixture
 def db(tmp_path):
     key = load_or_create_key(tmp_path / "secret.key")
-    database = Database(tmp_path / "app.db", key)
-    database.init_schema()
-    return database
+    with Database(tmp_path / "app.db", key) as database:
+        database.init_schema()
+        yield database
 
 
 def test_save_and_get_account_roundtrips_credentials(db):
@@ -67,3 +67,37 @@ def test_create_and_update_job(db):
     db.update_job_progress("job-1", processed=42, status="completed")
     job = db.get_job("job-1")
     assert job["status"] == "completed"
+
+
+def test_foreign_keys_pragma_is_enabled(db):
+    (enabled,) = db._conn.execute("PRAGMA foreign_keys").fetchone()
+
+    assert enabled == 1
+
+
+def test_foreign_key_constraint_is_enforced(db):
+    with pytest.raises(sqlite3.IntegrityError):
+        db.create_job("job-1", "no-such-account", total=1)
+
+
+def test_database_works_as_context_manager(tmp_path):
+    key = load_or_create_key(tmp_path / "secret.key")
+
+    with Database(tmp_path / "app.db", key) as db:
+        db.init_schema()
+        db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "x"})
+        assert db.get_account("acc-1")["provider"] == "gmail"
+
+    with pytest.raises(sqlite3.ProgrammingError):
+        db.list_accounts()
+
+
+def test_close_closes_the_connection(tmp_path):
+    key = load_or_create_key(tmp_path / "secret.key")
+    db = Database(tmp_path / "app.db", key)
+    db.init_schema()
+
+    db.close()
+
+    with pytest.raises(sqlite3.ProgrammingError):
+        db.list_accounts()

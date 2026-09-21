@@ -29,9 +29,9 @@ class _FakeProvider(EmailProvider):
 @pytest.fixture
 def service(tmp_path):
     key = load_or_create_key(tmp_path / "secret.key")
-    db = Database(tmp_path / "app.db", key)
-    db.init_schema()
-    return AccountService(db, provider_factories={"fake": _FakeProvider})
+    with Database(tmp_path / "app.db", key) as db:
+        db.init_schema()
+        yield AccountService(db, provider_factories={"fake": _FakeProvider})
 
 
 def test_connect_account_persists_and_returns_in_list(service):
@@ -59,10 +59,10 @@ def test_get_provider_raises_lookup_error_for_unknown_account(service):
 
 def test_get_provider_raises_value_error_for_unknown_provider_type(tmp_path):
     key = load_or_create_key(tmp_path / "secret.key")
-    db = Database(tmp_path / "app.db", key)
-    db.init_schema()
-    service = AccountService(db, provider_factories={})
-    service.connect_account("acc-1", "fake", "rafael@example.com", {"token": "x"})
+    with Database(tmp_path / "app.db", key) as db:
+        db.init_schema()
+        service = AccountService(db, provider_factories={})
+        service.connect_account("acc-1", "fake", "rafael@example.com", {"token": "x"})
 
-    with pytest.raises(ValueError):
-        service.get_provider("acc-1")
+        with pytest.raises(ValueError):
+            service.get_provider("acc-1")
