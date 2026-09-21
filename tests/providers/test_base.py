@@ -1,6 +1,11 @@
 import pytest
 
-from mail_organizer.providers.base import EmailProvider, Message, RuleCondition
+from mail_organizer.providers.base import (
+    EmailProvider,
+    Folder,
+    Message,
+    RuleCondition,
+)
 
 
 def test_rule_condition_requires_sender_or_domain():
@@ -17,6 +22,20 @@ def test_rule_condition_accepts_sender_only():
     condition = RuleCondition(sender="a@b.com")
     assert condition.sender == "a@b.com"
     assert condition.domain is None
+
+
+def test_folder_carries_id_name_and_defaults_flags_to_empty():
+    folder = Folder(id="Label_5", name="Promotions")
+
+    assert folder.id == "Label_5"
+    assert folder.name == "Promotions"
+    assert folder.flags == ()
+
+
+def test_folder_accepts_flags():
+    folder = Folder(id="Deleted Messages", name="Deleted Messages", flags=(b"\\Trash",))
+
+    assert folder.flags == (b"\\Trash",)
 
 
 def test_message_defaults():
