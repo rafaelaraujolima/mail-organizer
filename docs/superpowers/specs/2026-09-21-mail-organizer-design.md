@@ -10,6 +10,9 @@ ou qualquer provedor IMAP), analisa as mensagens e propõe:
 
 1. Organização em pastas (mover emails para categorias sugeridas por IA).
 2. Identificação de emails irrelevantes, spam ou phishing, com proposta de exclusão.
+3. Criação de regras nativas na caixa de entrada (Gmail/Outlook) quando um padrão
+   repetido de remetente/domínio → pasta é detectado, automatizando organizações
+   futuras semelhantes.
 
 **Princípio central: nada é executado automaticamente.** Toda ação (mover, excluir)
 é apenas uma *proposta* até o usuário aprovar explicitamente, individualmente ou em
@@ -26,6 +29,11 @@ autenticação multi-tenant, deploy remoto, etc.
 - Multi-tenant / publicação como produto para outros usuários.
 - Exclusão permanente de emails (delete sempre move para a Lixeira/Trash do provedor).
 - Edição de conteúdo de email, resposta, envio.
+- Criação de regras via `ImapProvider`: IMAP genérico não tem API padrão de
+  filtros/regras do servidor (Sieve existe mas não é universal); a proposta de
+  regra fica disponível apenas para contas Gmail e Outlook/Graph.
+- Regras com ação de exclusão automática (regra só move para pasta; exclusão
+  continua sempre proposta email a email, nunca automatizada por regra).
 
 ## Arquitetura
 
@@ -52,15 +60,22 @@ list_messages(folder, filters)
 get_message(id)          # corpo completo + headers
 move_message(id, target_folder)
 delete_message(id)       # move para Trash/Lixeira do provedor
+create_rule(condition, target_folder)   # opcional — ver abaixo
+supports_rules()          # bool — indica se o provedor implementa create_rule
 ```
 
 Implementações:
 
-- `GmailProvider` — Gmail API, OAuth2.
+- `GmailProvider` — Gmail API, OAuth2. Implementa `create_rule` via
+  `users.settings.filters` (Gmail Filters API).
 - `GraphProvider` — Microsoft Graph API, OAuth2 (cobre Outlook/Hotmail/Office365).
+  Implementa `create_rule` via `messageRules` (Graph API).
 - `ImapProvider` — IMAP+SMTP genérico. Usado para:
   - Apple/iCloud (preset de host/porta, instruções de senha de app).
   - Qualquer outro provedor IMAP não coberto pelos anteriores.
+  - `supports_rules()` retorna `false`; `create_rule` não é implementado
+    (ver Não-objetivos). O frontend esconde a opção de criar regra quando
+    `supports_rules()` é falso para a conta.
 
 Cada provedor é isolado atrás da interface comum, permitindo testar e adicionar
 novos provedores sem alterar o motor de classificação.
@@ -84,17 +99,30 @@ novos provedores sem alterar o motor de classificação.
    - Gera uma **proposta**: mover para pasta X | sinalizar como possível
      phishing/spam com sugestão de exclusão | manter como está — sempre com
      justificativa curta.
+   - **Detecção de padrão para regra:** ao final do lote, se `supports_rules()`
+     for verdadeiro para a conta e 3+ emails (limiar configurável) do mesmo
+     remetente ou domínio receberam a mesma proposta de pasta destino, gera
+     também uma **proposta de regra**: "criar regra: emails de
+     `<remetente ou domínio>` → mover para pasta X", com justificativa
+     informando quantos emails do lote bateram o padrão.
    - Progresso do job atualizado; proposta disponível via polling do frontend.
 4. **Revisão pelo usuário:** propostas agrupadas (por pasta sugerida / por
-   "possível lixo"); aprovação individual ou em lote por grupo. Cada proposta
-   mostra remetente, assunto, data, preview em texto puro e a justificativa da
-   IA. Para ver o corpo HTML completo, o usuário clica em "mostrar conteúdo
-   completo" — o HTML passa por sanitização (remove `<script>`, bloqueia
-   imagens remotas por padrão, mostra URLs em vez de links clicáveis diretos),
-   especialmente relevante para emails sinalizados como suspeitos.
+   "possível lixo" / por regra sugerida); aprovação individual ou em lote por
+   grupo. Cada proposta de email mostra remetente, assunto, data, preview em
+   texto puro e a justificativa da IA. Para ver o corpo HTML completo, o
+   usuário clica em "mostrar conteúdo completo" — o HTML passa por
+   sanitização (remove `<script>`, bloqueia imagens remotas por padrão, mostra
+   URLs em vez de links clicáveis diretos), especialmente relevante para
+   emails sinalizados como suspeitos. Uma proposta de regra é revisada e
+   aprovada/rejeitada de forma independente das propostas de email do mesmo
+   lote — aprovar a regra não aplica retroativamente aos emails já propostos
+   individualmente, e vice-versa.
 5. **Aplicação:** só ao confirmar, backend chama `move_message`/`delete_message`
    no `EmailProvider` correspondente. Delete = mover para Trash/Lixeira, nunca
-   exclusão permanente.
+   exclusão permanente. Para proposta de regra aprovada, backend chama
+   `create_rule` no provedor correspondente (condição: remetente exato ou
+   domínio; ação: mover para pasta — sem opção de exclusão automática via
+   regra).
 
 ## Tratamento de erros
 
@@ -105,7 +133,10 @@ novos provedores sem alterar o motor de classificação.
 - **Falha ao processar um email específico:** não derruba o job inteiro; email
   marcado "erro ao analisar", pulado, reportado ao final para revisão manual.
 - **Falha ao aplicar ação aprovada:** reporta sucesso/falha por ação, permite
-  retry só das que falharam; nunca reexecuta as que já tiveram sucesso.
+  retry só das que falharam; nunca reexecuta as que já tiveram sucesso. Vale
+  também para `create_rule`: falha ao criar a regra não afeta as propostas de
+  email já aplicadas do mesmo lote, e é reportada individualmente com opção
+  de retry.
 - **Segurança:** tokens/senhas sempre criptografados em repouso; nunca logados
   em texto claro.
 
@@ -116,7 +147,12 @@ novos provedores sem alterar o motor de classificação.
   isoladas.
 - **Conectores:** testes contra mocks de cada `EmailProvider`, sem bater em
   contas reais, garantindo que a interface comum se comporta igual entre
-  Gmail/Graph/IMAP.
+  Gmail/Graph/IMAP. Inclui teste de que `ImapProvider.supports_rules()`
+  retorna `false` e que `GmailProvider`/`GraphProvider` chamam a API de
+  filtro/regra correta em `create_rule`.
+- **Detecção de padrão para regra:** testes unitários da lógica que agrupa
+  propostas do lote por remetente/domínio e decide quando o limiar (3+) é
+  atingido — pura e isolada, sem depender de LLM ou provedor real.
 - **Classificação LLM:** testes de integração opcionais (skippable se Ollama
   não estiver disponível no ambiente), verificando apenas o formato esperado
   da proposta — qualidade da classificação é validada manualmente pelo usuário
