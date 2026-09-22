@@ -95,3 +95,53 @@ def test_has_suspicious_links_false_for_legitimate_matching_domain():
 
 def test_has_suspicious_links_false_for_empty_html():
     assert has_suspicious_links("") is False
+
+
+from mail_organizer.heuristics import HeuristicResult, analyze_message
+from mail_organizer.providers.base import Message
+
+
+def _make_message(**overrides) -> Message:
+    defaults = dict(
+        id="1", folder="INBOX", sender="a@b.com", subject="Hi", date="2026-01-01",
+        body_html="", headers={},
+    )
+    defaults.update(overrides)
+    return Message(**defaults)
+
+
+def test_analyze_message_flags_spf_failure():
+    message = _make_message(headers={"Authentication-Results": "spf=fail"})
+
+    result = analyze_message(message)
+
+    assert "spf_fail" in result.flags
+    assert result.is_suspicious is True
+
+
+def test_analyze_message_flags_domain_mismatch():
+    message = _make_message(sender="victim@bank.com", headers={"Return-Path": "<x@evil.com>"})
+
+    result = analyze_message(message)
+
+    assert "domain_mismatch" in result.flags
+    assert result.is_suspicious is True
+
+
+def test_analyze_message_flags_suspicious_links():
+    message = _make_message(body_html='<a href="https://bit.ly/x">click</a>')
+
+    result = analyze_message(message)
+
+    assert "suspicious_links" in result.flags
+
+
+def test_analyze_message_clean_message_has_no_flags():
+    message = _make_message(
+        headers={"Authentication-Results": "spf=pass dkim=pass dmarc=pass"},
+    )
+
+    result = analyze_message(message)
+
+    assert result.flags == []
+    assert result.is_suspicious is False

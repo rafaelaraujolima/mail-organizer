@@ -1,6 +1,8 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from email.utils import parseaddr
+
+from mail_organizer.providers.base import Message
 
 
 @dataclass
@@ -78,3 +80,40 @@ def has_suspicious_links(html: str | None, expected_domain: str | None = None) -
         if expected_domain and domain != expected_domain and _looks_like_spoof(domain, expected_domain):
             return True
     return False
+
+
+@dataclass
+class HeuristicResult:
+    auth: AuthResult
+    domain_mismatch: bool
+    suspicious_links: bool
+    flags: list[str] = field(default_factory=list)
+
+    @property
+    def is_suspicious(self) -> bool:
+        return bool(self.flags)
+
+
+def analyze_message(message: Message) -> HeuristicResult:
+    auth = parse_authentication_results(message.headers)
+    domain_mismatch = detect_domain_mismatch(message.sender, message.headers)
+    suspicious_links = has_suspicious_links(message.body_html, _extract_domain(message.sender))
+
+    flags = []
+    if auth.spf == "fail":
+        flags.append("spf_fail")
+    if auth.dkim == "fail":
+        flags.append("dkim_fail")
+    if auth.dmarc == "fail":
+        flags.append("dmarc_fail")
+    if domain_mismatch:
+        flags.append("domain_mismatch")
+    if suspicious_links:
+        flags.append("suspicious_links")
+
+    return HeuristicResult(
+        auth=auth,
+        domain_mismatch=domain_mismatch,
+        suspicious_links=suspicious_links,
+        flags=flags,
+    )
