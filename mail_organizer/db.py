@@ -19,7 +19,18 @@ CREATE TABLE IF NOT EXISTS jobs (
     total INTEGER NOT NULL,
     processed INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'running',
+    error_message TEXT,
     FOREIGN KEY (account_id) REFERENCES accounts (account_id)
+);
+
+CREATE TABLE IF NOT EXISTS proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_folder TEXT,
+    reason TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES jobs (job_id)
 );
 """
 
@@ -108,3 +119,31 @@ class Database:
             "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
         ).fetchone()
         return dict(row) if row else None
+
+    def mark_job_failed(self, job_id: str, error_message: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE jobs SET status = 'failed', error_message = ? WHERE job_id = ?",
+                (error_message, job_id),
+            )
+            self._conn.commit()
+
+    def add_proposal(
+        self, job_id: str, message_id: str, action: str, target_folder: str | None, reason: str
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO proposals (job_id, message_id, action, target_folder, reason)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (job_id, message_id, action, target_folder, reason),
+            )
+            self._conn.commit()
+
+    def list_proposals(self, job_id: str) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT message_id, action, target_folder, reason FROM proposals WHERE job_id = ? ORDER BY id",
+            (job_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
