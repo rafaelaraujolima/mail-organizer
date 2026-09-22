@@ -77,8 +77,13 @@ def has_suspicious_links(html: str | None, expected_domain: str | None = None) -
         domain = match.group(1).lower().split(":")[0]
         if domain in SHORTENER_DOMAINS:
             return True
-        if expected_domain and domain != expected_domain and _looks_like_spoof(domain, expected_domain):
-            return True
+        if expected_domain and domain != expected_domain:
+            if domain.endswith("." + expected_domain):
+                # Legitimate subdomain of the sender's own domain (e.g. www.,
+                # click.mail., links.) -- not a lookalike, don't flag it.
+                continue
+            if _looks_like_spoof(domain, expected_domain):
+                return True
     return False
 
 

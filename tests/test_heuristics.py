@@ -93,6 +93,24 @@ def test_has_suspicious_links_false_for_legitimate_matching_domain():
     assert has_suspicious_links(html, expected_domain="paypal.com") is False
 
 
+def test_has_suspicious_links_false_for_www_subdomain_of_expected_domain():
+    html = '<a href="https://www.paypal.com/login">login</a>'
+
+    assert has_suspicious_links(html, expected_domain="paypal.com") is False
+
+
+def test_has_suspicious_links_false_for_multi_label_legitimate_subdomain():
+    html = '<a href="https://click.mail.nytimes.com/track">read more</a>'
+
+    assert has_suspicious_links(html, expected_domain="nytimes.com") is False
+
+
+def test_has_suspicious_links_true_for_lookalike_domain_still_flags():
+    html = '<a href="https://paypal.com.evil.com/login">login</a>'
+
+    assert has_suspicious_links(html, expected_domain="paypal.com") is True
+
+
 def test_has_suspicious_links_false_for_empty_html():
     assert has_suspicious_links("") is False
 
