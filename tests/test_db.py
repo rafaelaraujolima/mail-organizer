@@ -58,6 +58,7 @@ def test_create_and_update_job(db):
         "total": 42,
         "processed": 0,
         "status": "running",
+        "error_message": None,
     }
 
     db.update_job_progress("job-1", processed=10, status="running")
@@ -101,3 +102,45 @@ def test_close_closes_the_connection(tmp_path):
 
     with pytest.raises(sqlite3.ProgrammingError):
         db.list_accounts()
+
+
+def test_mark_job_failed_sets_status_and_error_message(db):
+    db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
+    db.create_job("job-1", "acc-1", total=10)
+
+    db.mark_job_failed("job-1", "Ollama não está rodando")
+
+    job = db.get_job("job-1")
+    assert job["status"] == "failed"
+    assert job["error_message"] == "Ollama não está rodando"
+
+
+def test_get_job_error_message_defaults_to_none(db):
+    db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
+    db.create_job("job-1", "acc-1", total=10)
+
+    job = db.get_job("job-1")
+
+    assert job["error_message"] is None
+
+
+def test_add_and_list_proposals_roundtrip_in_insertion_order(db):
+    db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
+    db.create_job("job-1", "acc-1", total=2)
+
+    db.add_proposal("job-1", "msg-1", "move", "Promotions", "Newsletter")
+    db.add_proposal("job-1", "msg-2", "flag_delete", None, "spf_fail")
+
+    proposals = db.list_proposals("job-1")
+
+    assert proposals == [
+        {"message_id": "msg-1", "action": "move", "target_folder": "Promotions", "reason": "Newsletter"},
+        {"message_id": "msg-2", "action": "flag_delete", "target_folder": None, "reason": "spf_fail"},
+    ]
+
+
+def test_list_proposals_empty_for_job_with_no_proposals(db):
+    db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
+    db.create_job("job-1", "acc-1", total=0)
+
+    assert db.list_proposals("job-1") == []
