@@ -96,6 +96,93 @@ def test_error_recording_failure_does_not_abort_scan():
     db.update_job_progress.assert_any_call("job-1", 1, "completed")
 
 
+def test_unanticipated_exception_before_loop_marks_job_failed_instead_of_hanging():
+    # An exception type neither of the two specific pre-loop handlers catches
+    # (e.g. a bare RuntimeError, standing in for things like requests'
+    # JSONDecodeError or google.auth.exceptions.RefreshError that aren't
+    # wrapped as OllamaUnavailableError/ProviderError) must still mark the
+    # job failed rather than letting it escape run_scan and leave the job
+    # stuck in "running" forever.
+    db = MagicMock()
+    provider = MagicMock()
+    llm_client = MagicMock()
+    llm_client.check_available.side_effect = RuntimeError("unexpected failure")
+
+    run_scan(db, provider, llm_client, "job-1", messages=[_make_message()])
+
+    db.mark_job_failed.assert_called_once()
+    assert "unexpected failure" in db.mark_job_failed.call_args.args[1]
+    db.add_proposal.assert_not_called()
+
+
+def test_unguarded_progress_write_in_loop_marks_job_failed_via_backstop():
+    # db.update_job_progress(..., "running") inside the loop's finally block
+    # is not wrapped by the per-message try/except. If IT raises, the
+    # backstop around the whole function body must still catch it and mark
+    # the job failed instead of letting the loop abort silently.
+    db = MagicMock()
+    provider = MagicMock()
+    provider.list_folders.return_value = []
+    llm_client = MagicMock()
+    llm_client.classify.return_value = ClassificationResult(folder=None, suspicious=False, reason="")
+    db.update_job_progress.side_effect = RuntimeError("db write failed")
+
+    messages = [_make_message("msg-1")]
+
+    run_scan(db, provider, llm_client, "job-1", messages=messages)
+
+    db.mark_job_failed.assert_called_once()
+    assert "db write failed" in db.mark_job_failed.call_args.args[1]
+
+
+def test_llm_hallucinated_folder_not_in_existing_folders_is_ignored():
+    db = MagicMock()
+    provider = MagicMock()
+    provider.list_folders.return_value = [Folder(id="INBOX", name="INBOX")]
+    llm_client = MagicMock()
+    llm_client.classify.return_value = ClassificationResult(
+        folder="NonexistentFolder", suspicious=False, reason=""
+    )
+
+    messages = [_make_message("msg-1")]
+
+    run_scan(db, provider, llm_client, "job-1", messages=messages)
+
+    db.add_proposal.assert_any_call("job-1", "msg-1", "keep", None, "Nenhuma ação sugerida")
+
+
+def test_run_scan_integrates_with_a_real_database(tmp_path):
+    from mail_organizer.crypto import load_or_create_key
+    from mail_organizer.db import Database
+
+    key = load_or_create_key(tmp_path / "secret.key")
+    with Database(tmp_path / "test.db", key) as db:
+        db.init_schema()
+        db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc"})
+        db.create_job("job-1", "acc-1", total=2)
+
+        provider = MagicMock()
+        provider.list_folders.return_value = [
+            Folder(id="INBOX", name="INBOX"), Folder(id="Promotions", name="Promotions")
+        ]
+        llm_client = MagicMock()
+        llm_client.classify.return_value = ClassificationResult(
+            folder="Promotions", suspicious=False, reason="Newsletter"
+        )
+
+        messages = [_make_message("msg-1"), _make_message("msg-2")]
+
+        run_scan(db, provider, llm_client, "job-1", messages=messages)
+
+        proposals = db.list_proposals("job-1")
+        assert len(proposals) == 2
+        assert proposals[0] == {
+            "message_id": "msg-1", "action": "move", "target_folder": "Promotions", "reason": "Newsletter"
+        }
+        job = db.get_job("job-1")
+        assert job["status"] == "completed"
+
+
 def test_empty_message_list_completes_immediately():
     db = MagicMock()
     provider = MagicMock()
