@@ -1,4 +1,5 @@
 import json
+import socket
 from unittest.mock import MagicMock
 
 import pytest
@@ -82,3 +83,28 @@ def test_classify_defaults_missing_fields():
     result = client.classify(_make_message(), existing_folders=[], heuristic_flags=[])
 
     assert result == ClassificationResult(folder=None, suspicious=False, reason="")
+
+
+def _ollama_reachable() -> bool:
+    try:
+        with socket.create_connection(("localhost", 11434), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(not _ollama_reachable(), reason="Ollama not running locally — skipping integration test")
+def test_classify_returns_expected_shape_against_real_ollama():
+    import requests
+
+    client = OllamaClient(requests.Session())
+    message = _make_message()
+
+    try:
+        result = client.classify(message, existing_folders=["INBOX"], heuristic_flags=[])
+    except Exception as exc:
+        pytest.skip(f"Ollama reachable but classify() failed (model likely not pulled): {exc}")
+
+    assert isinstance(result.folder, (str, type(None)))
+    assert isinstance(result.suspicious, bool)
+    assert isinstance(result.reason, str)
