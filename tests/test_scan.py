@@ -79,6 +79,23 @@ def test_provider_error_while_listing_folders_marks_job_failed():
     db.add_proposal.assert_not_called()
 
 
+def test_error_recording_failure_does_not_abort_scan():
+    db = MagicMock()
+    provider = MagicMock()
+    provider.list_folders.return_value = []
+    llm_client = MagicMock()
+    llm_client.classify.side_effect = RuntimeError("boom")
+    # The fallback db.add_proposal("error", ...) call itself fails (e.g. transient
+    # DB error). This must not escape run_scan or leave the job stuck "running".
+    db.add_proposal.side_effect = RuntimeError("db write failed")
+
+    messages = [_make_message("msg-1")]
+
+    run_scan(db, provider, llm_client, "job-1", messages=messages)
+
+    db.update_job_progress.assert_any_call("job-1", 1, "completed")
+
+
 def test_empty_message_list_completes_immediately():
     db = MagicMock()
     provider = MagicMock()

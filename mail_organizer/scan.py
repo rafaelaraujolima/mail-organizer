@@ -33,7 +33,13 @@ def run_scan(
             proposal = build_proposal(message, heuristic_result, classification)
             db.add_proposal(job_id, proposal.message_id, proposal.action, proposal.target_folder, proposal.reason)
         except Exception as exc:
-            db.add_proposal(job_id, message.id, "error", None, f"Erro ao analisar: {exc}")
+            try:
+                db.add_proposal(job_id, message.id, "error", None, f"Erro ao analisar: {exc}")
+            except Exception:
+                # Recording the failure itself failed (e.g. transient DB error).
+                # Swallow it so the scan keeps going and still reaches
+                # "completed" below, instead of leaving the job stuck "running".
+                pass
         finally:
             processed += 1
             db.update_job_progress(job_id, processed, "running")
