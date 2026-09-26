@@ -51,16 +51,22 @@ instancia `AccountService`, registra os routers e monta `StaticFiles` na raiz.
     `{APP_BASE_URL}/accounts/gmail/callback`) — precisa bater exatamente com o que foi
     registrado no Google Cloud Console / Azure AD, então o valor efetivo é logado uma
     vez na inicialização do servidor para facilitar o registro.
-  - Troca código→token; token (+ refresh token) persistido via
+  - Troca código→token; apenas o `refresh_token` é persistido via
     `AccountService.connect_account` (que já criptografa em repouso via `db.py`).
-  - Nenhuma credencial OAuth é logada; erros de troca de token retornam mensagem
-    genérica ao frontend, detalhe completo só em log de servidor.
+    Nunca se guarda `access_token`: a cada uso de um provedor OAuth, o factory troca o
+    `refresh_token` por um `access_token` novo na hora — mais simples e mais seguro que
+    rastrear expiração, aceitável para um app local single-user.
+  - Nenhuma credencial OAuth é logada. As mensagens de erro de troca de token
+    devolvidas ao frontend são construídas por `oauth.py` (status HTTP + corpo de erro
+    do provedor, ou uma orientação como "revogue o acesso e reconecte") e nunca contêm
+    tokens, `code` ou `client_secret`.
 
 - **`mail_organizer/sanitize.py`** — `sanitize_html(html: str) -> str`, usando
   `bleach` (nova dependência): allowlist restrita de tags (`p`, `br`, `b`, `i`,
   `strong`, `em`, `ul`, `ol`, `li`, `blockquote`, `div`, `span`, `table*`), remove
-  `<script>`/`<style>`/`on*` handlers, remove `src` de `<img>` (bloqueia carregamento
-  remoto por padrão), e substitui `<a href="URL">texto</a>` pelo texto `texto (URL)`
+  `<script>`/`<style>` (tag e conteúdo) e todos os atributos (`on*` handlers, etc.),
+  remove `<img>` por inteiro (nenhuma imagem remota chega a ser carregada — mais
+  simples e mais robusto que só remover o `src`), e substitui `<a href="URL">texto</a>` pelo texto `texto (URL)`
   em vez de um link clicável — conforme o requisito do spec geral, "especialmente
   relevante para emails sinalizados como suspeitos".
 
@@ -153,8 +159,9 @@ resultado) — sem fila separada, dado o volume esperado de um MVP local single-
 - **OAuth:** testa a troca código→token mockando a chamada HTTP externa (Google/
   Microsoft) — nunca contra as APIs reais; testa o caminho de `client_id`/`secret`
   ausente retornando o erro claro.
-- **`sanitize_html`:** testes unitários puros — remove `<script>`, remove `src` de
-  imagens, converte `<a>` em texto+URL, preserva tags da allowlist.
+- **`sanitize_html`:** testes unitários puros — remove `<script>`/`<style>`, remove
+  `<img>`, converte `<a>` (inclusive `javascript:`) em texto+URL, remove atributos
+  de eventos, preserva tags da allowlist.
 - **`apply_proposal`:** provider mockado — resolve nome→id corretamente, ambos os
   ramos de ação (move/delete), pasta não encontrada, falha do provedor não derruba
   outras aplicações do lote.
