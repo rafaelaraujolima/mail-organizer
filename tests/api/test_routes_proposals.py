@@ -272,3 +272,50 @@ def test_batch_approve_dedupes_ids(client, db):
     response = client.post("/proposals/batch-approve", json={"ids": [proposal_id, proposal_id]})
 
     assert response.json() == {str(proposal_id): "ok"}
+
+
+@pytest.mark.parametrize("exc_type", [OSError, TimeoutError, RuntimeError])
+def test_batch_approve_survives_unexpected_provider_exceptions(db, exc_type):
+    from fastapi.testclient import TestClient
+
+    from mail_organizer.api.app import create_app
+
+    class _Raising(_FakeProvider):
+        def move_message(self, message_id, target_folder):
+            if message_id == "msg-1":
+                raise exc_type("kaboom")
+
+    client = TestClient(create_app(db, {"raising": _Raising}))
+    db.save_account("acc-1", "raising", "x", {})
+    db.create_job("job-1", "acc-1", total=2)
+    db.add_proposal("job-1", "msg-1", "move", "Promotions", "r1")
+    db.add_proposal("job-1", "msg-2", "move", "Promotions", "r2")
+    ids = [p["id"] for p in db.list_proposals("job-1")]
+
+    response = client.post("/proposals/batch-approve", json={"ids": ids})
+
+    assert response.status_code == 200
+    results = response.json()
+    assert results[str(ids[0])].startswith("error:")
+    assert "kaboom" in results[str(ids[0])]
+    assert results[str(ids[1])] == "ok"
+
+
+def test_single_approve_returns_502_when_provider_raises_unexpected_error(db):
+    from fastapi.testclient import TestClient
+
+    from mail_organizer.api.app import create_app
+
+    class _Raising(_FakeProvider):
+        def delete_message(self, message_id):
+            raise TimeoutError("slow")
+
+    client = TestClient(create_app(db, {"raising": _Raising}))
+    proposal_id = _seed_proposal(db, provider_type="raising", action="flag_delete", target_folder=None)
+
+    response = client.post(f"/proposals/{proposal_id}/approve")
+
+    assert response.status_code == 502
+    proposal = db.get_proposal(proposal_id)
+    assert proposal["applied_status"] == "pending"
+    assert "slow" in proposal["applied_error"]

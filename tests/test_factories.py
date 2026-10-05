@@ -100,3 +100,36 @@ def test_imap_provider_factory_defaults_port_to_993():
         imap_provider_factory({"host": "imap.example.com", "username": "a@example.com", "password": "pw"})
 
     mock_imap_cls.assert_called_once_with("imap.example.com", port=993, ssl=True)
+
+
+def test_refresh_maps_network_error_to_provider_auth_error_without_secrets():
+    import requests
+
+    session = MagicMock()
+    session.post.side_effect = requests.ConnectionError("boom rt-secret")
+    factory = make_gmail_provider_factory("cid", "csecret", session=session)
+
+    with pytest.raises(ProviderAuthError) as excinfo:
+        factory({"refresh_token": "rt-secret"})
+
+    assert str(excinfo.value) == "Falha de rede ao renovar token de acesso"
+
+
+def test_refresh_maps_non_json_200_to_provider_auth_error():
+    session = MagicMock()
+    response = _mock_response()
+    response.json.side_effect = ValueError("not json")
+    session.post.return_value = response
+    factory = make_graph_provider_factory("cid", "secret", session=session)
+
+    with pytest.raises(ProviderAuthError):
+        factory({"refresh_token": "rt"})
+
+
+def test_refresh_maps_missing_access_token_to_provider_auth_error():
+    session = MagicMock()
+    session.post.return_value = _mock_response(json_body={"other": "x"})
+    factory = make_gmail_provider_factory("cid", "secret", session=session)
+
+    with pytest.raises(ProviderAuthError):
+        factory({"refresh_token": "rt"})

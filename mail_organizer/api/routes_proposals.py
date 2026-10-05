@@ -39,7 +39,15 @@ def _apply_and_record(db: Database, service: AccountService, proposal: dict) -> 
         db.mark_proposal_applied(proposal["id"], "pending", message)
         return {"success": False, "message": message}
 
-    result = apply_proposal(provider, proposal)
+    try:
+        result = apply_proposal(provider, proposal)
+    except Exception as exc:
+        # Backstop (same pattern as scan.run_scan): a provider raising something
+        # other than ProviderError must not become an unhandled 500 or abort a batch.
+        message = f"Erro inesperado ao aplicar: {exc}"
+        db.mark_proposal_applied(proposal["id"], "pending", message)
+        return {"success": False, "message": message}
+
     db.mark_proposal_applied(
         proposal["id"],
         "applied" if result.success else "pending",

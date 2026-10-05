@@ -90,3 +90,25 @@ def test_exchange_graph_code_raises_when_refresh_token_missing():
 
     with pytest.raises(OAuthExchangeError):
         exchange_graph_code(session, "cid", "secret", "http://localhost:8000/cb2", "auth-code")
+
+
+@pytest.mark.parametrize("exchange", [exchange_gmail_code, exchange_graph_code])
+def test_exchange_maps_network_error_to_oauth_exchange_error(exchange):
+    import requests
+
+    session = MagicMock()
+    session.post.side_effect = requests.ConnectionError("down")
+
+    with pytest.raises(OAuthExchangeError):
+        exchange(session, "cid", "secret", "http://x/cb", "code")
+
+
+@pytest.mark.parametrize("exchange", [exchange_gmail_code, exchange_graph_code])
+def test_exchange_maps_non_json_200_to_oauth_exchange_error(exchange):
+    session = MagicMock()
+    response = _mock_response()
+    response.json.side_effect = ValueError("not json")
+    session.post.return_value = response
+
+    with pytest.raises(OAuthExchangeError):
+        exchange(session, "cid", "secret", "http://x/cb", "code")

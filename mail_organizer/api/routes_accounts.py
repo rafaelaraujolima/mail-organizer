@@ -56,10 +56,12 @@ def list_folders(account_id: str, service: AccountService = Depends(get_account_
         provider = service.get_provider(account_id)
     except LookupError:
         raise HTTPException(status_code=404, detail="Conta não encontrada")
+    except (ValueError, ProviderError, OSError) as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao acessar a conta: {exc}")
 
     try:
         folders = provider.list_folders()
-    except ProviderError as exc:
+    except (ProviderError, OSError) as exc:
         raise HTTPException(status_code=502, detail=f"Falha ao acessar a caixa: {exc}")
 
     return [{"id": f.id, "name": f.name} for f in folders]

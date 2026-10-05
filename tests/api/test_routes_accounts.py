@@ -1,7 +1,7 @@
 import pytest
 
 from mail_organizer.providers.base import EmailProvider, Folder
-from mail_organizer.providers.errors import ProviderError
+from mail_organizer.providers.errors import ProviderAuthError, ProviderError
 
 
 class _FakeProvider(EmailProvider):
@@ -103,3 +103,61 @@ def test_list_folders_returns_502_on_provider_error(client, db):
 
     assert response.status_code == 502
     assert "token expired" in response.json()["detail"]
+
+
+def _auth_failing_factory(credentials):
+    raise ProviderAuthError("token refresh failed")
+
+
+class _TimeoutProvider(_FakeProvider):
+    def list_folders(self):
+        raise TimeoutError("slow")
+
+    def list_messages(self, folder, filters):
+        raise TimeoutError("slow")
+
+
+@pytest.fixture
+def broken_client(db):
+    from fastapi.testclient import TestClient
+
+    from mail_organizer.api.app import create_app
+
+    factories = {"authfail": _auth_failing_factory, "timeout": _TimeoutProvider}
+    return TestClient(create_app(db, factories))
+
+
+def test_list_folders_returns_502_when_factory_raises_auth_error(broken_client, db):
+    db.save_account("acc-1", "authfail", "x", {})
+
+    response = broken_client.get("/accounts/acc-1/folders")
+
+    assert response.status_code == 502
+
+
+def test_list_folders_returns_502_when_provider_type_has_no_factory(broken_client, db):
+    db.save_account("acc-1", "nonexistent", "x", {})
+
+    response = broken_client.get("/accounts/acc-1/folders")
+
+    assert response.status_code == 502
+
+
+def test_list_folders_returns_502_on_oserror_from_provider(broken_client, db):
+    db.save_account("acc-1", "timeout", "x", {})
+
+    response = broken_client.get("/accounts/acc-1/folders")
+
+    assert response.status_code == 502
+
+
+def test_scan_returns_502_and_creates_no_job_when_factory_fails(broken_client, db):
+    db.save_account("acc-1", "authfail", "x", {})
+    db.save_account("acc-2", "nonexistent", "x", {})
+    db.save_account("acc-3", "timeout", "x", {})
+
+    for account_id in ("acc-1", "acc-2", "acc-3"):
+        response = broken_client.post("/scan", json={"account_id": account_id, "folder": "INBOX", "filters": {}})
+        assert response.status_code == 502
+
+    assert db._conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0

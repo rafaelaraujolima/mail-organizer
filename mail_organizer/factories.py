@@ -12,19 +12,25 @@ from mail_organizer.providers.imap import ImapProvider
 
 
 def _refresh_access_token(session, token_url: str, client_id: str, client_secret: str, refresh_token: str) -> str:
-    response = session.post(
-        token_url,
-        data={
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        },
-        timeout=10,
-    )
+    try:
+        response = session.post(
+            token_url,
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        raise ProviderAuthError("Falha de rede ao renovar token de acesso") from exc
     if response.status_code != 200:
         raise ProviderAuthError(f"Falha ao renovar token de acesso: {response.status_code} {response.text}")
-    return response.json()["access_token"]
+    try:
+        return response.json()["access_token"]
+    except (ValueError, KeyError) as exc:
+        raise ProviderAuthError("Resposta inválida ao renovar token de acesso") from exc
 
 
 def make_gmail_provider_factory(client_id: str, client_secret: str, session=None):

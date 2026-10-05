@@ -32,10 +32,12 @@ def start_scan(
         provider = service.get_provider(body.account_id)
     except LookupError:
         raise HTTPException(status_code=404, detail="Conta não encontrada")
+    except (ValueError, ProviderError, OSError) as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao acessar a conta: {exc}")
 
     try:
         messages = provider.list_messages(body.folder, body.filters)
-    except ProviderError as exc:
+    except (ProviderError, OSError) as exc:
         raise HTTPException(status_code=502, detail=f"Falha ao listar mensagens: {exc}")
 
     job_id = str(uuid.uuid4())
