@@ -230,3 +230,38 @@ def test_mark_proposal_applied_never_touches_an_applied_row(db):
     proposal = db.get_proposal(proposal_id)
     assert proposal["applied_status"] == "applied"
     assert proposal["applied_error"] is None
+
+
+def test_init_schema_raises_for_a_database_created_before_the_new_columns(tmp_path):
+    from mail_organizer.db import SchemaOutOfDateError
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE accounts (account_id TEXT PRIMARY KEY, provider TEXT NOT NULL,
+            display_name TEXT NOT NULL, credentials_encrypted BLOB NOT NULL);
+        CREATE TABLE jobs (job_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, total INTEGER NOT NULL,
+            processed INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'running', error_message TEXT);
+        CREATE TABLE proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
+            message_id TEXT NOT NULL, action TEXT NOT NULL, target_folder TEXT, reason TEXT NOT NULL);
+        """
+    )
+    conn.commit()
+    conn.close()
+    key = load_or_create_key(tmp_path / "secret.key")
+
+    with Database(path, key) as old:
+        with pytest.raises(SchemaOutOfDateError) as excinfo:
+            old.init_schema()
+
+    assert "old.db" in str(excinfo.value)
+    assert isinstance(excinfo.value, RuntimeError)
+
+
+def test_init_schema_accepts_a_fresh_database(tmp_path):
+    key = load_or_create_key(tmp_path / "secret.key")
+
+    with Database(tmp_path / "fresh.db", key) as fresh:
+        fresh.init_schema()
+        fresh.init_schema()

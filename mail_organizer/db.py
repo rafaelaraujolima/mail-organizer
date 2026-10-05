@@ -42,8 +42,24 @@ CREATE TABLE IF NOT EXISTS proposals (
 """
 
 
+EXPECTED_COLUMNS = {
+    "jobs": {
+        "job_id", "account_id", "total", "processed", "status", "error_message", "folder",
+    },
+    "proposals": {
+        "id", "job_id", "message_id", "action", "target_folder", "reason",
+        "sender", "subject", "date", "snippet", "applied_status", "applied_error",
+    },
+}
+
+
+class SchemaOutOfDateError(RuntimeError):
+    """The database file was created by an older version of the schema."""
+
+
 class Database:
     def __init__(self, path: pathlib.Path, key: bytes):
+        self._path = path
         self._key = key
         # check_same_thread=False so the connection survives being used from a
         # worker thread (e.g. FastAPI BackgroundTasks); self._lock serialises writes.
@@ -53,6 +69,16 @@ class Database:
 
     def init_schema(self) -> None:
         self._conn.executescript(SCHEMA)
+        # CREATE TABLE IF NOT EXISTS leaves old tables untouched (no migrations, ADR-0003):
+        # fail clearly instead of with an opaque "no such column" at request time.
+        for table, expected in EXPECTED_COLUMNS.items():
+            actual = {row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})")}
+            if expected - actual:
+                raise SchemaOutOfDateError(
+                    f"O banco de dados '{self._path}' foi criado por uma versão anterior "
+                    f"(tabela '{table}' sem as colunas: {', '.join(sorted(expected - actual))}). "
+                    "Apague o arquivo ou mova-o para outro lugar e inicie de novo."
+                )
         # Per-connection pragma: SQLite ignores declared FKs unless this is on.
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.commit()
