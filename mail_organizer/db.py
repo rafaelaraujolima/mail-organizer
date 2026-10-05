@@ -167,7 +167,8 @@ class Database:
     def mark_proposal_applied(self, proposal_id: int, status: str, error: str | None = None) -> None:
         with self._lock:
             self._conn.execute(
-                "UPDATE proposals SET applied_status = ?, applied_error = ? WHERE id = ?",
+                "UPDATE proposals SET applied_status = ?, applied_error = ? "
+                "WHERE id = ? AND applied_status != 'applied'",
                 (status, error, proposal_id),
             )
             self._conn.commit()

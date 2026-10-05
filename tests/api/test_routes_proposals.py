@@ -226,3 +226,49 @@ def test_get_message_content_returns_502_when_provider_cannot_be_built(client, d
     response = client.get("/jobs/job-1/messages/msg-1/content")
 
     assert response.status_code == 502
+
+
+class _SlowProvider(_FakeProvider):
+    calls: list = []
+
+    def move_message(self, message_id, target_folder):
+        import time
+
+        _SlowProvider.calls.append((message_id, target_folder))
+        time.sleep(0.2)
+
+
+def test_concurrent_approves_call_the_provider_once(db, provider_factories):
+    import threading
+
+    from fastapi.testclient import TestClient
+
+    from mail_organizer.api.app import create_app
+
+    _SlowProvider.calls = []
+    app = create_app(db, {"slow": _SlowProvider})
+    proposal_id = _seed_proposal(db, provider_type="slow")
+    statuses = []
+
+    def fire():
+        with TestClient(app) as c:
+            statuses.append(c.post(f"/proposals/{proposal_id}/approve").status_code)
+
+    threads = [threading.Thread(target=fire) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sorted(statuses) == [200, 409]
+    assert len(_SlowProvider.calls) == 1
+    assert db.get_proposal(proposal_id)["applied_status"] == "applied"
+
+
+def test_batch_approve_dedupes_ids(client, db):
+    _SlowProvider.calls = []
+    proposal_id = _seed_proposal(db)
+
+    response = client.post("/proposals/batch-approve", json={"ids": [proposal_id, proposal_id]})
+
+    assert response.json() == {str(proposal_id): "ok"}

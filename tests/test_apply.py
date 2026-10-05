@@ -90,3 +90,13 @@ def test_apply_error_action_is_a_noop():
     assert result.success is True
     provider.move_message.assert_not_called()
     provider.delete_message.assert_not_called()
+
+
+def test_apply_unknown_action_fails_without_calling_the_provider():
+    provider = MagicMock()
+
+    result = apply_proposal(provider, _proposal(action="archive", target_folder=None))
+
+    assert result == ApplyResult(success=False, message="Ação desconhecida: archive")
+    provider.move_message.assert_not_called()
+    provider.delete_message.assert_not_called()

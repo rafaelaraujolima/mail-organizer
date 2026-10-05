@@ -166,22 +166,27 @@ async function pollJob() {
   }
 }
 
-async function toggleContent(proposal, holder, errorEl) {
+async function toggleContent(proposal, holder, errorEl, viewButton) {
   errorEl.textContent = "";
   if (holder.firstChild) {
     clearChildren(holder);
     return;
   }
+  viewButton.disabled = true;
   try {
     const data = await fetchJSON(
       `/jobs/${encodeURIComponent(currentJobId)}/messages/${encodeURIComponent(proposal.message_id)}/content`
     );
+    // Re-check after the await so two iframes can never be appended.
+    if (holder.firstChild) return;
     const iframe = document.createElement("iframe");
     iframe.setAttribute("sandbox", "");
     iframe.srcdoc = data.html;
     holder.appendChild(iframe);
   } catch (err) {
     errorEl.textContent = errorMessage(err);
+  } finally {
+    viewButton.disabled = false;
   }
 }
 
@@ -215,6 +220,8 @@ function buildProposal(proposal) {
   const approve = makeEl("button", { className: "approve-one", text: "Aprovar" });
   approve.disabled = !pending;
   approve.addEventListener("click", async () => {
+    // Lock synchronously, before the await; only the list reload re-enables.
+    lockActions();
     errorEl.textContent = "";
     let failure = null;
     try {
@@ -229,6 +236,7 @@ function buildProposal(proposal) {
   const reject = makeEl("button", { className: "reject-one", text: "Rejeitar" });
   reject.disabled = !pending;
   reject.addEventListener("click", async () => {
+    lockActions();
     errorEl.textContent = "";
     let failure = null;
     try {
@@ -240,7 +248,13 @@ function buildProposal(proposal) {
   });
 
   const view = makeEl("button", { className: "view-content", text: "Ver conteúdo" });
-  view.addEventListener("click", () => toggleContent(proposal, holder, errorEl));
+  view.addEventListener("click", () => toggleContent(proposal, holder, errorEl, view));
+
+  function lockActions() {
+    approve.disabled = true;
+    reject.disabled = true;
+    checkbox.disabled = true;
+  }
 
   div.append(approve, reject, view, errorEl, holder);
   return div;

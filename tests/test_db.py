@@ -206,3 +206,18 @@ def test_create_job_folder_defaults_to_none(db):
     db.create_job("job-1", "acc-1", total=1)
 
     assert db.get_job("job-1")["folder"] is None
+
+
+def test_mark_proposal_applied_never_touches_an_applied_row(db):
+    db.save_account("acc-1", "imap", "x", {})
+    db.create_job("job-1", "acc-1", total=1)
+    db.add_proposal("job-1", "m1", "move", "P", "r")
+    proposal_id = db.list_proposals("job-1")[0]["id"]
+    db.mark_proposal_applied(proposal_id, "applied")
+
+    db.mark_proposal_applied(proposal_id, "pending", "x")
+    db.mark_proposal_applied(proposal_id, "rejected")
+
+    proposal = db.get_proposal(proposal_id)
+    assert proposal["applied_status"] == "applied"
+    assert proposal["applied_error"] is None

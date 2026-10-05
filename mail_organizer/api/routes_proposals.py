@@ -1,3 +1,5 @@
+import threading
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -9,6 +11,11 @@ from mail_organizer.providers.errors import ProviderError
 from mail_organizer.sanitize import sanitize_html
 
 router = APIRouter(tags=["proposals"])
+
+# Sync handlers run in a threadpool; without this lock two concurrent approvals
+# of the same proposal both pass the "not applied" check. Single-user app, so
+# serializing approvals is acceptable.
+_APPLY_LOCK = threading.Lock()
 
 
 def _open_provider(service: AccountService, job: dict):
@@ -45,13 +52,14 @@ def _apply_and_record(db: Database, service: AccountService, proposal: dict) -> 
 def approve_proposal(
     proposal_id: int, db: Database = Depends(get_db), service: AccountService = Depends(get_account_service)
 ) -> dict:
-    proposal = db.get_proposal(proposal_id)
-    if proposal is None:
-        raise HTTPException(status_code=404, detail="Proposta não encontrada")
-    if proposal["applied_status"] == "applied":
-        raise HTTPException(status_code=409, detail="Proposta já foi aplicada")
+    with _APPLY_LOCK:
+        proposal = db.get_proposal(proposal_id)
+        if proposal is None:
+            raise HTTPException(status_code=404, detail="Proposta não encontrada")
+        if proposal["applied_status"] == "applied":
+            raise HTTPException(status_code=409, detail="Proposta já foi aplicada")
 
-    result = _apply_and_record(db, service, proposal)
+        result = _apply_and_record(db, service, proposal)
     if not result["success"]:
         raise HTTPException(status_code=502, detail=result["message"])
     return result
@@ -80,16 +88,17 @@ def batch_approve(
     service: AccountService = Depends(get_account_service),
 ) -> dict:
     results: dict[str, str] = {}
-    for proposal_id in body.ids:
-        proposal = db.get_proposal(proposal_id)
-        if proposal is None:
-            results[str(proposal_id)] = "error: proposta não encontrada"
-            continue
-        if proposal["applied_status"] == "applied":
-            results[str(proposal_id)] = "error: já aplicada"
-            continue
+    for proposal_id in dict.fromkeys(body.ids):
+        with _APPLY_LOCK:
+            proposal = db.get_proposal(proposal_id)
+            if proposal is None:
+                results[str(proposal_id)] = "error: proposta não encontrada"
+                continue
+            if proposal["applied_status"] == "applied":
+                results[str(proposal_id)] = "error: já aplicada"
+                continue
 
-        outcome = _apply_and_record(db, service, proposal)
+            outcome = _apply_and_record(db, service, proposal)
         results[str(proposal_id)] = "ok" if outcome["success"] else f"error: {outcome['message']}"
 
     return results

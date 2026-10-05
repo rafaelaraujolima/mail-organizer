@@ -38,4 +38,7 @@ def apply_proposal(provider: EmailProvider, proposal: dict) -> ApplyResult:
         return ApplyResult(success=True, message="Movido para a Lixeira")
 
     # "keep" and "error" proposals require no provider call.
-    return ApplyResult(success=True, message="Nenhuma ação necessária")
+    if action in ("keep", "error"):
+        return ApplyResult(success=True, message="Nenhuma ação necessária")
+
+    return ApplyResult(success=False, message=f"Ação desconhecida: {action}")
