@@ -28,4 +28,4 @@ def app(db, provider_factories):
 
 @pytest.fixture
 def client(app):
-    return TestClient(app)
+    return TestClient(app, headers={"X-Requested-With": "mail-organizer"})

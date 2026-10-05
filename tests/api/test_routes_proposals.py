@@ -251,7 +251,7 @@ def test_concurrent_approves_call_the_provider_once(db, provider_factories):
     statuses = []
 
     def fire():
-        with TestClient(app) as c:
+        with TestClient(app, headers={"X-Requested-With": "mail-organizer"}) as c:
             statuses.append(c.post(f"/proposals/{proposal_id}/approve").status_code)
 
     threads = [threading.Thread(target=fire) for _ in range(2)]
@@ -285,7 +285,7 @@ def test_batch_approve_survives_unexpected_provider_exceptions(db, exc_type):
             if message_id == "msg-1":
                 raise exc_type("kaboom")
 
-    client = TestClient(create_app(db, {"raising": _Raising}))
+    client = TestClient(create_app(db, {"raising": _Raising}), headers={"X-Requested-With": "mail-organizer"})
     db.save_account("acc-1", "raising", "x", {})
     db.create_job("job-1", "acc-1", total=2)
     db.add_proposal("job-1", "msg-1", "move", "Promotions", "r1")
@@ -310,7 +310,7 @@ def test_single_approve_returns_502_when_provider_raises_unexpected_error(db):
         def delete_message(self, message_id):
             raise TimeoutError("slow")
 
-    client = TestClient(create_app(db, {"raising": _Raising}))
+    client = TestClient(create_app(db, {"raising": _Raising}), headers={"X-Requested-With": "mail-organizer"})
     proposal_id = _seed_proposal(db, provider_type="raising", action="flag_delete", target_folder=None)
 
     response = client.post(f"/proposals/{proposal_id}/approve")

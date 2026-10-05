@@ -31,7 +31,12 @@ function errorMessage(err) {
   return err && err.message ? err.message : String(err);
 }
 
-async function fetchJSON(url, options) {
+// Every non-GET request carries the custom header the API requires (CSRF defence, ADR-0013).
+async function fetchJSON(url, options = {}) {
+  const method = (options.method || "GET").toUpperCase();
+  if (method !== "GET") {
+    options = { ...options, headers: { ...options.headers, "X-Requested-With": "mail-organizer" } };
+  }
   const response = await fetch(url, options);
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));

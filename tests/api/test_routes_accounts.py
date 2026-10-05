@@ -124,7 +124,7 @@ def broken_client(db):
     from mail_organizer.api.app import create_app
 
     factories = {"authfail": _auth_failing_factory, "timeout": _TimeoutProvider}
-    return TestClient(create_app(db, factories))
+    return TestClient(create_app(db, factories), headers={"X-Requested-With": "mail-organizer"})
 
 
 def test_list_folders_returns_502_when_factory_raises_auth_error(broken_client, db):

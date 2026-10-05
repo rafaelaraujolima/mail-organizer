@@ -1,5 +1,6 @@
 import os
 import pathlib
+from urllib.parse import urlparse
 
 import requests
 
@@ -13,7 +14,7 @@ from mail_organizer.factories import (
 )
 
 DATA_DIR = pathlib.Path(os.environ.get("MAIL_ORGANIZER_DATA_DIR", str(pathlib.Path.home() / ".mail-organizer")))
-BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8000")
+BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
 
 key = load_or_create_key(DATA_DIR / "secret.key")
 db = Database(DATA_DIR / "app.db", key)
@@ -49,6 +50,8 @@ if oauth_config:
     for provider_name, config in oauth_config.items():
         print(f"  {provider_name}: {config['redirect_uri']}")
 
+ALLOWED_HOSTS = list(dict.fromkeys(h for h in ["localhost", "127.0.0.1", urlparse(BASE_URL).hostname] if h))
+
 STATIC_DIR = pathlib.Path(__file__).resolve().parent.parent / "static"
 
 app = create_app(
@@ -58,4 +61,5 @@ app = create_app(
     ollama_base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
     ollama_model=os.environ.get("OLLAMA_MODEL", "llama3.2:3b"),
     static_dir=STATIC_DIR,
+    allowed_hosts=ALLOWED_HOSTS,
 )

@@ -77,10 +77,23 @@ def _oauth_config(request: Request, provider: str) -> dict:
     return config
 
 
+def _new_state(request: Request) -> str:
+    state = secrets.token_urlsafe(16)
+    request.app.state.oauth_states.add(state)
+    return state
+
+
+def _consume_state(request: Request, state: str | None) -> None:
+    # Single use; checked before any code exchange.
+    if not state or state not in request.app.state.oauth_states:
+        raise HTTPException(status_code=400, detail="state inválido ou ausente")
+    request.app.state.oauth_states.discard(state)
+
+
 @router.get("/gmail/authorize")
 def gmail_authorize(request: Request):
     config = _oauth_config(request, "gmail")
-    state = secrets.token_urlsafe(16)
+    state = _new_state(request)
     url = build_gmail_authorize_url(config["client_id"], config["redirect_uri"], state)
     return RedirectResponse(url)
 
@@ -90,9 +103,11 @@ def gmail_callback(
     request: Request,
     code: str | None = None,
     error: str | None = None,
+    state: str | None = None,
     display_name: str = "Gmail",
     service: AccountService = Depends(get_account_service),
 ) -> dict:
+    _consume_state(request, state)
     if error or not code:
         raise HTTPException(status_code=400, detail=f"Autorização Google não concluída: {error or 'código ausente'}")
 
@@ -112,7 +127,7 @@ def gmail_callback(
 @router.get("/graph/authorize")
 def graph_authorize(request: Request):
     config = _oauth_config(request, "graph")
-    state = secrets.token_urlsafe(16)
+    state = _new_state(request)
     url = build_graph_authorize_url(config["client_id"], config["redirect_uri"], state)
     return RedirectResponse(url)
 
@@ -122,9 +137,11 @@ def graph_callback(
     request: Request,
     code: str | None = None,
     error: str | None = None,
+    state: str | None = None,
     display_name: str = "Outlook",
     service: AccountService = Depends(get_account_service),
 ) -> dict:
+    _consume_state(request, state)
     if error or not code:
         raise HTTPException(status_code=400, detail=f"Autorização Microsoft não concluída: {error or 'código ausente'}")
 

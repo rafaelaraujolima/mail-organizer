@@ -23,4 +23,5 @@ Gmail and Graph require OAuth2. The app needs the authorization code flow (redir
 
 - One extra renewal call per provider use (acceptable MVP latency).
 - App depends on user registering their own OAuth app.
-- **Pending:** `state` param generated in `authorize` but not validated in callback (OAuth CSRF protection). Must be handled before any use outside `localhost`.
+- The `state` param is generated in `authorize`, stored in memory, and validated and consumed (single use) at the callback before any code exchange (see ADR-0013).
+- Graph rotates refresh tokens and the new one is not persisted, so Graph accounts must be reconnected when the refresh token expires (~90 days of inactivity); the failure surfaces as `ProviderAuthError`.
