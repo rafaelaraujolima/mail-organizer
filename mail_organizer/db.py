@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     processed INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'running',
     error_message TEXT,
+    folder TEXT,
     FOREIGN KEY (account_id) REFERENCES accounts (account_id)
 );
 
@@ -100,11 +101,11 @@ class Database:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def create_job(self, job_id: str, account_id: str, total: int) -> None:
+    def create_job(self, job_id: str, account_id: str, total: int, folder: str | None = None) -> None:
         with self._lock:
             self._conn.execute(
-                "INSERT INTO jobs (job_id, account_id, total) VALUES (?, ?, ?)",
-                (job_id, account_id, total),
+                "INSERT INTO jobs (job_id, account_id, total, folder) VALUES (?, ?, ?, ?)",
+                (job_id, account_id, total, folder),
             )
             self._conn.commit()
 

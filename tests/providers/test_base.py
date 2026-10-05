@@ -77,3 +77,9 @@ def test_create_rule_raises_not_implemented_by_default():
 def test_email_provider_cannot_be_instantiated_directly():
     with pytest.raises(TypeError):
         EmailProvider()
+
+
+def test_select_folder_defaults_to_a_noop():
+    provider = _MinimalProvider()
+
+    assert provider.select_folder("INBOX") is None

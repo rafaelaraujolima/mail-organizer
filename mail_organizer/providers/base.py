@@ -58,6 +58,13 @@ class EmailProvider(ABC):
     def supports_rules(self) -> bool:
         return False
 
+    def select_folder(self, folder: str) -> None:
+        """Prepare the provider to act on messages that live in ``folder``.
+
+        Providers whose message ids are only meaningful inside a folder (IMAP)
+        override this; for the others it is a no-op.
+        """
+
     def create_rule(self, condition: RuleCondition, target_folder: str) -> str:
         """Create a server-side rule filing matches into ``target_folder``.
 

@@ -59,6 +59,7 @@ def test_create_and_update_job(db):
         "processed": 0,
         "status": "running",
         "error_message": None,
+        "folder": None,
     }
 
     db.update_job_progress("job-1", processed=10, status="running")
@@ -191,3 +192,17 @@ def test_mark_proposal_applied_records_failure_and_stays_retryable(db):
     proposal = db.get_proposal(1)
     assert proposal["applied_status"] == "pending"
     assert proposal["applied_error"] == "Pasta não existe mais"
+
+
+def test_create_job_stores_scanned_folder(db):
+    db.save_account("acc-1", "imap", "x", {"host": "h"})
+    db.create_job("job-1", "acc-1", total=1, folder="INBOX")
+
+    assert db.get_job("job-1")["folder"] == "INBOX"
+
+
+def test_create_job_folder_defaults_to_none(db):
+    db.save_account("acc-1", "imap", "x", {"host": "h"})
+    db.create_job("job-1", "acc-1", total=1)
+
+    assert db.get_job("job-1")["folder"] is None
