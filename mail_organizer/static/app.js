@@ -212,6 +212,15 @@ function buildProposal(proposal) {
   if (proposal.target_folder) {
     div.appendChild(makeEl("span", { text: ` → ${proposal.target_folder}` }));
   }
+  // Plain-text preview of the message; older rows may lack these fields.
+  for (const [label, value] of [
+    ["De:", proposal.sender],
+    ["Assunto:", proposal.subject],
+    ["Data:", proposal.date],
+  ]) {
+    if (value) div.appendChild(makeEl("div", { className: "preview", text: `${label} ${value}` }));
+  }
+  if (proposal.snippet) div.appendChild(makeEl("div", { className: "snippet", text: proposal.snippet }));
   div.appendChild(makeEl("div", { className: "reason", text: proposal.reason || "" }));
   div.appendChild(
     makeEl("div", {

@@ -129,7 +129,10 @@ def test_add_and_list_proposals_roundtrip_in_insertion_order(db):
     db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
     db.create_job("job-1", "acc-1", total=2)
 
-    db.add_proposal("job-1", "msg-1", "move", "Promotions", "Newsletter")
+    db.add_proposal(
+        "job-1", "msg-1", "move", "Promotions", "Newsletter",
+        sender="a@b.com", subject="Hi", date="2026-01-01", snippet="preview",
+    )
     db.add_proposal("job-1", "msg-2", "flag_delete", None, "spf_fail")
 
     proposals = db.list_proposals("job-1")
@@ -138,10 +141,12 @@ def test_add_and_list_proposals_roundtrip_in_insertion_order(db):
         {
             "id": 1, "message_id": "msg-1", "action": "move", "target_folder": "Promotions",
             "reason": "Newsletter", "applied_status": "pending", "applied_error": None,
+            "sender": "a@b.com", "subject": "Hi", "date": "2026-01-01", "snippet": "preview",
         },
         {
             "id": 2, "message_id": "msg-2", "action": "flag_delete", "target_folder": None,
             "reason": "spf_fail", "applied_status": "pending", "applied_error": None,
+            "sender": None, "subject": None, "date": None, "snippet": None,
         },
     ]
 
@@ -156,7 +161,10 @@ def test_list_proposals_empty_for_job_with_no_proposals(db):
 def test_get_proposal_returns_full_row_including_job_id(db):
     db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
     db.create_job("job-1", "acc-1", total=1)
-    db.add_proposal("job-1", "msg-1", "move", "Promotions", "Newsletter")
+    db.add_proposal(
+        "job-1", "msg-1", "move", "Promotions", "Newsletter",
+        sender="a@b.com", subject="Hi", date="2026-01-01", snippet="preview",
+    )
 
     proposal = db.get_proposal(1)
 
@@ -164,6 +172,7 @@ def test_get_proposal_returns_full_row_including_job_id(db):
         "id": 1, "job_id": "job-1", "message_id": "msg-1", "action": "move",
         "target_folder": "Promotions", "reason": "Newsletter",
         "applied_status": "pending", "applied_error": None,
+        "sender": "a@b.com", "subject": "Hi", "date": "2026-01-01", "snippet": "preview",
     }
 
 

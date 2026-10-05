@@ -8,7 +8,7 @@ from mail_organizer.scan import run_scan
 def _make_message(msg_id="msg-1", **overrides) -> Message:
     defaults = dict(
         id=msg_id, folder="INBOX", sender="a@b.com", subject="Hi", date="2026-01-01",
-        body_text="hello", headers={},
+        body_text="hello", snippet="hello snippet", headers={},
     )
     defaults.update(overrides)
     return Message(**defaults)
@@ -39,8 +39,8 @@ def test_processes_each_message_and_records_proposal_and_progress():
     run_scan(db, provider, llm_client, "job-1", messages=messages)
 
     assert db.add_proposal.call_count == 2
-    db.add_proposal.assert_any_call("job-1", "msg-1", "move", "Promotions", "Newsletter")
-    db.add_proposal.assert_any_call("job-1", "msg-2", "move", "Promotions", "Newsletter")
+    db.add_proposal.assert_any_call("job-1", "msg-1", "move", "Promotions", "Newsletter", sender="a@b.com", subject="Hi", date="2026-01-01", snippet="hello snippet")
+    db.add_proposal.assert_any_call("job-1", "msg-2", "move", "Promotions", "Newsletter", sender="a@b.com", subject="Hi", date="2026-01-01", snippet="hello snippet")
     db.update_job_progress.assert_any_call("job-1", 1, "running")
     db.update_job_progress.assert_any_call("job-1", 2, "running")
     db.update_job_progress.assert_any_call("job-1", 2, "completed")
@@ -58,8 +58,8 @@ def test_per_message_failure_is_recorded_as_error_and_does_not_stop_the_scan():
 
     run_scan(db, provider, llm_client, "job-1", messages=messages)
 
-    db.add_proposal.assert_any_call("job-1", "msg-1", "error", None, "Erro ao analisar: boom")
-    db.add_proposal.assert_any_call("job-1", "msg-2", "keep", None, "Nenhuma ação sugerida")
+    db.add_proposal.assert_any_call("job-1", "msg-1", "error", None, "Erro ao analisar: boom", sender="a@b.com", subject="Hi", date="2026-01-01", snippet="hello snippet")
+    db.add_proposal.assert_any_call("job-1", "msg-2", "keep", None, "Nenhuma ação sugerida", sender="a@b.com", subject="Hi", date="2026-01-01", snippet="hello snippet")
     db.update_job_progress.assert_any_call("job-1", 2, "completed")
     db.mark_job_failed.assert_not_called()
 
@@ -148,7 +148,7 @@ def test_llm_hallucinated_folder_not_in_existing_folders_is_ignored():
 
     run_scan(db, provider, llm_client, "job-1", messages=messages)
 
-    db.add_proposal.assert_any_call("job-1", "msg-1", "keep", None, "Nenhuma ação sugerida")
+    db.add_proposal.assert_any_call("job-1", "msg-1", "keep", None, "Nenhuma ação sugerida", sender="a@b.com", subject="Hi", date="2026-01-01", snippet="hello snippet")
 
 
 def test_run_scan_integrates_with_a_real_database(tmp_path):
@@ -179,6 +179,7 @@ def test_run_scan_integrates_with_a_real_database(tmp_path):
         assert proposals[0] == {
             "id": 1, "message_id": "msg-1", "action": "move", "target_folder": "Promotions",
             "reason": "Newsletter", "applied_status": "pending", "applied_error": None,
+            "sender": "a@b.com", "subject": "Hi", "date": "2026-01-01", "snippet": "hello snippet",
         }
         job = db.get_job("job-1")
         assert job["status"] == "completed"
@@ -194,3 +195,15 @@ def test_empty_message_list_completes_immediately():
 
     db.update_job_progress.assert_called_once_with("job-1", 0, "completed")
     db.add_proposal.assert_not_called()
+
+
+def test_snippet_is_truncated_to_200_characters_and_none_becomes_empty():
+    db = MagicMock()
+    provider = MagicMock()
+    provider.list_folders.return_value = []
+    llm_client = MagicMock()
+    llm_client.classify.return_value = ClassificationResult(folder=None, suspicious=False, reason="")
+
+    run_scan(db, provider, llm_client, "job-1", messages=[_make_message("msg-1", snippet="x" * 500)])
+
+    assert db.add_proposal.call_args.kwargs["snippet"] == "x" * 200

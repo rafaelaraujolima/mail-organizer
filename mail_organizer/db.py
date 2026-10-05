@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS proposals (
     action TEXT NOT NULL,
     target_folder TEXT,
     reason TEXT NOT NULL,
+    sender TEXT,
+    subject TEXT,
+    date TEXT,
+    snippet TEXT,
     applied_status TEXT NOT NULL DEFAULT 'pending',
     applied_error TEXT,
     FOREIGN KEY (job_id) REFERENCES jobs (job_id)
@@ -132,22 +136,33 @@ class Database:
             self._conn.commit()
 
     def add_proposal(
-        self, job_id: str, message_id: str, action: str, target_folder: str | None, reason: str
+        self,
+        job_id: str,
+        message_id: str,
+        action: str,
+        target_folder: str | None,
+        reason: str,
+        sender: str | None = None,
+        subject: str | None = None,
+        date: str | None = None,
+        snippet: str | None = None,
     ) -> None:
         with self._lock:
             self._conn.execute(
                 """
-                INSERT INTO proposals (job_id, message_id, action, target_folder, reason)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO proposals
+                    (job_id, message_id, action, target_folder, reason, sender, subject, date, snippet)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (job_id, message_id, action, target_folder, reason),
+                (job_id, message_id, action, target_folder, reason, sender, subject, date, snippet),
             )
             self._conn.commit()
 
     def list_proposals(self, job_id: str) -> list[dict]:
         rows = self._conn.execute(
             """
-            SELECT id, message_id, action, target_folder, reason, applied_status, applied_error
+            SELECT id, message_id, action, target_folder, reason, applied_status, applied_error,
+                   sender, subject, date, snippet
             FROM proposals WHERE job_id = ? ORDER BY id
             """,
             (job_id,),
@@ -157,7 +172,8 @@ class Database:
     def get_proposal(self, proposal_id: int) -> dict | None:
         row = self._conn.execute(
             """
-            SELECT id, job_id, message_id, action, target_folder, reason, applied_status, applied_error
+            SELECT id, job_id, message_id, action, target_folder, reason, applied_status, applied_error,
+                   sender, subject, date, snippet
             FROM proposals WHERE id = ?
             """,
             (proposal_id,),
