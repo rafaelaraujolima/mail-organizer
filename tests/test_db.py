@@ -134,8 +134,14 @@ def test_add_and_list_proposals_roundtrip_in_insertion_order(db):
     proposals = db.list_proposals("job-1")
 
     assert proposals == [
-        {"message_id": "msg-1", "action": "move", "target_folder": "Promotions", "reason": "Newsletter"},
-        {"message_id": "msg-2", "action": "flag_delete", "target_folder": None, "reason": "spf_fail"},
+        {
+            "id": 1, "message_id": "msg-1", "action": "move", "target_folder": "Promotions",
+            "reason": "Newsletter", "applied_status": "pending", "applied_error": None,
+        },
+        {
+            "id": 2, "message_id": "msg-2", "action": "flag_delete", "target_folder": None,
+            "reason": "spf_fail", "applied_status": "pending", "applied_error": None,
+        },
     ]
 
 
@@ -144,3 +150,44 @@ def test_list_proposals_empty_for_job_with_no_proposals(db):
     db.create_job("job-1", "acc-1", total=0)
 
     assert db.list_proposals("job-1") == []
+
+
+def test_get_proposal_returns_full_row_including_job_id(db):
+    db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
+    db.create_job("job-1", "acc-1", total=1)
+    db.add_proposal("job-1", "msg-1", "move", "Promotions", "Newsletter")
+
+    proposal = db.get_proposal(1)
+
+    assert proposal == {
+        "id": 1, "job_id": "job-1", "message_id": "msg-1", "action": "move",
+        "target_folder": "Promotions", "reason": "Newsletter",
+        "applied_status": "pending", "applied_error": None,
+    }
+
+
+def test_get_proposal_returns_none_for_missing_id(db):
+    assert db.get_proposal(999) is None
+
+
+def test_mark_proposal_applied_sets_status_and_error(db):
+    db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
+    db.create_job("job-1", "acc-1", total=1)
+    db.add_proposal("job-1", "msg-1", "move", "Promotions", "Newsletter")
+
+    db.mark_proposal_applied(1, "applied")
+
+    assert db.get_proposal(1)["applied_status"] == "applied"
+    assert db.get_proposal(1)["applied_error"] is None
+
+
+def test_mark_proposal_applied_records_failure_and_stays_retryable(db):
+    db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
+    db.create_job("job-1", "acc-1", total=1)
+    db.add_proposal("job-1", "msg-1", "move", "Promotions", "Newsletter")
+
+    db.mark_proposal_applied(1, "pending", "Pasta não existe mais")
+
+    proposal = db.get_proposal(1)
+    assert proposal["applied_status"] == "pending"
+    assert proposal["applied_error"] == "Pasta não existe mais"

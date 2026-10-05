@@ -177,7 +177,8 @@ def test_run_scan_integrates_with_a_real_database(tmp_path):
         proposals = db.list_proposals("job-1")
         assert len(proposals) == 2
         assert proposals[0] == {
-            "message_id": "msg-1", "action": "move", "target_folder": "Promotions", "reason": "Newsletter"
+            "id": 1, "message_id": "msg-1", "action": "move", "target_folder": "Promotions",
+            "reason": "Newsletter", "applied_status": "pending", "applied_error": None,
         }
         job = db.get_job("job-1")
         assert job["status"] == "completed"

@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS proposals (
     action TEXT NOT NULL,
     target_folder TEXT,
     reason TEXT NOT NULL,
+    applied_status TEXT NOT NULL DEFAULT 'pending',
+    applied_error TEXT,
     FOREIGN KEY (job_id) REFERENCES jobs (job_id)
 );
 """
@@ -143,7 +145,28 @@ class Database:
 
     def list_proposals(self, job_id: str) -> list[dict]:
         rows = self._conn.execute(
-            "SELECT message_id, action, target_folder, reason FROM proposals WHERE job_id = ? ORDER BY id",
+            """
+            SELECT id, message_id, action, target_folder, reason, applied_status, applied_error
+            FROM proposals WHERE job_id = ? ORDER BY id
+            """,
             (job_id,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_proposal(self, proposal_id: int) -> dict | None:
+        row = self._conn.execute(
+            """
+            SELECT id, job_id, message_id, action, target_folder, reason, applied_status, applied_error
+            FROM proposals WHERE id = ?
+            """,
+            (proposal_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def mark_proposal_applied(self, proposal_id: int, status: str, error: str | None = None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE proposals SET applied_status = ?, applied_error = ? WHERE id = ?",
+                (status, error, proposal_id),
+            )
+            self._conn.commit()
