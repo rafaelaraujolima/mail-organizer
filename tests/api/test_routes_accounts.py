@@ -51,6 +51,23 @@ def test_connect_imap_verifies_credentials_and_persists_account(client, monkeypa
     assert any(a["account_id"] == account_id and a["provider"] == "imap" for a in accounts)
 
 
+def test_list_accounts_never_exposes_the_imap_password(client, monkeypatch):
+    monkeypatch.setattr(
+        "mail_organizer.api.routes_accounts.imap_provider_factory",
+        lambda credentials: _FakeProvider(credentials),
+    )
+    client.post(
+        "/accounts/imap",
+        json={"display_name": "iCloud", "host": "imap.mail.me.com", "port": 993, "username": "a@icloud.com", "password": "s3cret-pw"},
+    )
+
+    response = client.get("/accounts")
+
+    assert response.status_code == 200
+    assert response.json() != []
+    assert "s3cret-pw" not in response.text
+
+
 def test_connect_imap_rejects_bad_credentials_without_saving(client, monkeypatch):
     def _raise(credentials):
         raise ProviderError("login failed")

@@ -1,3 +1,5 @@
+import pytest
+
 from mail_organizer.sanitize import sanitize_html
 
 
@@ -49,3 +51,36 @@ def test_preserves_allowed_formatting_tags():
 def test_empty_or_none_input_returns_empty_string():
     assert sanitize_html("") == ""
     assert sanitize_html(None) == ""
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<SCRIPT>alert(1)</SCRIPT>x",
+        "<a href=javascript:alert(1)>click</a>",
+        "<a href='javascript:x'>t</a>",
+        '<a href="https://e.com"><img src=x onerror=alert(1)>pay</a>',
+        "<script>alert(1)",
+        "<scr<script>ipt>alert(1)</scr</script>ipt>",
+        "<svg onload=alert(1)>",
+        "<!-- c --><p>t</p>",
+    ],
+)
+def test_adversarial_input_yields_inert_output(html):
+    out = sanitize_html(html).lower()
+
+    assert "<script" not in out
+    assert "onerror" not in out
+    assert "onload" not in out
+    assert "<a " not in out
+    assert "<img" not in out
+    assert "<svg" not in out
+    assert "<!--" not in out
+
+
+def test_uppercase_script_tag_is_removed_but_surrounding_text_kept():
+    assert sanitize_html("<SCRIPT>alert(1)</SCRIPT>x") == "x"
+
+
+def test_single_quoted_javascript_link_is_rendered_as_text_with_its_url():
+    assert sanitize_html("<a href='javascript:x'>t</a>") == "t (javascript:x)"
