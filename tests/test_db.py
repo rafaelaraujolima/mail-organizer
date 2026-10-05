@@ -59,6 +59,7 @@ def test_create_and_update_job(db):
         "processed": 0,
         "status": "running",
         "error_message": None,
+        "folder": None,
     }
 
     db.update_job_progress("job-1", processed=10, status="running")
@@ -128,14 +129,25 @@ def test_add_and_list_proposals_roundtrip_in_insertion_order(db):
     db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
     db.create_job("job-1", "acc-1", total=2)
 
-    db.add_proposal("job-1", "msg-1", "move", "Promotions", "Newsletter")
+    db.add_proposal(
+        "job-1", "msg-1", "move", "Promotions", "Newsletter",
+        sender="a@b.com", subject="Hi", date="2026-01-01", snippet="preview",
+    )
     db.add_proposal("job-1", "msg-2", "flag_delete", None, "spf_fail")
 
     proposals = db.list_proposals("job-1")
 
     assert proposals == [
-        {"message_id": "msg-1", "action": "move", "target_folder": "Promotions", "reason": "Newsletter"},
-        {"message_id": "msg-2", "action": "flag_delete", "target_folder": None, "reason": "spf_fail"},
+        {
+            "id": 1, "message_id": "msg-1", "action": "move", "target_folder": "Promotions",
+            "reason": "Newsletter", "applied_status": "pending", "applied_error": None,
+            "sender": "a@b.com", "subject": "Hi", "date": "2026-01-01", "snippet": "preview",
+        },
+        {
+            "id": 2, "message_id": "msg-2", "action": "flag_delete", "target_folder": None,
+            "reason": "spf_fail", "applied_status": "pending", "applied_error": None,
+            "sender": None, "subject": None, "date": None, "snippet": None,
+        },
     ]
 
 
@@ -144,3 +156,112 @@ def test_list_proposals_empty_for_job_with_no_proposals(db):
     db.create_job("job-1", "acc-1", total=0)
 
     assert db.list_proposals("job-1") == []
+
+
+def test_get_proposal_returns_full_row_including_job_id(db):
+    db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
+    db.create_job("job-1", "acc-1", total=1)
+    db.add_proposal(
+        "job-1", "msg-1", "move", "Promotions", "Newsletter",
+        sender="a@b.com", subject="Hi", date="2026-01-01", snippet="preview",
+    )
+
+    proposal = db.get_proposal(1)
+
+    assert proposal == {
+        "id": 1, "job_id": "job-1", "message_id": "msg-1", "action": "move",
+        "target_folder": "Promotions", "reason": "Newsletter",
+        "applied_status": "pending", "applied_error": None,
+        "sender": "a@b.com", "subject": "Hi", "date": "2026-01-01", "snippet": "preview",
+    }
+
+
+def test_get_proposal_returns_none_for_missing_id(db):
+    assert db.get_proposal(999) is None
+
+
+def test_mark_proposal_applied_sets_status_and_error(db):
+    db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
+    db.create_job("job-1", "acc-1", total=1)
+    db.add_proposal("job-1", "msg-1", "move", "Promotions", "Newsletter")
+
+    db.mark_proposal_applied(1, "applied")
+
+    assert db.get_proposal(1)["applied_status"] == "applied"
+    assert db.get_proposal(1)["applied_error"] is None
+
+
+def test_mark_proposal_applied_records_failure_and_stays_retryable(db):
+    db.save_account("acc-1", "gmail", "rafael@gmail.com", {"refresh_token": "abc123"})
+    db.create_job("job-1", "acc-1", total=1)
+    db.add_proposal("job-1", "msg-1", "move", "Promotions", "Newsletter")
+
+    db.mark_proposal_applied(1, "pending", "Pasta não existe mais")
+
+    proposal = db.get_proposal(1)
+    assert proposal["applied_status"] == "pending"
+    assert proposal["applied_error"] == "Pasta não existe mais"
+
+
+def test_create_job_stores_scanned_folder(db):
+    db.save_account("acc-1", "imap", "x", {"host": "h"})
+    db.create_job("job-1", "acc-1", total=1, folder="INBOX")
+
+    assert db.get_job("job-1")["folder"] == "INBOX"
+
+
+def test_create_job_folder_defaults_to_none(db):
+    db.save_account("acc-1", "imap", "x", {"host": "h"})
+    db.create_job("job-1", "acc-1", total=1)
+
+    assert db.get_job("job-1")["folder"] is None
+
+
+def test_mark_proposal_applied_never_touches_an_applied_row(db):
+    db.save_account("acc-1", "imap", "x", {})
+    db.create_job("job-1", "acc-1", total=1)
+    db.add_proposal("job-1", "m1", "move", "P", "r")
+    proposal_id = db.list_proposals("job-1")[0]["id"]
+    db.mark_proposal_applied(proposal_id, "applied")
+
+    db.mark_proposal_applied(proposal_id, "pending", "x")
+    db.mark_proposal_applied(proposal_id, "rejected")
+
+    proposal = db.get_proposal(proposal_id)
+    assert proposal["applied_status"] == "applied"
+    assert proposal["applied_error"] is None
+
+
+def test_init_schema_raises_for_a_database_created_before_the_new_columns(tmp_path):
+    from mail_organizer.db import SchemaOutOfDateError
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE accounts (account_id TEXT PRIMARY KEY, provider TEXT NOT NULL,
+            display_name TEXT NOT NULL, credentials_encrypted BLOB NOT NULL);
+        CREATE TABLE jobs (job_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, total INTEGER NOT NULL,
+            processed INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'running', error_message TEXT);
+        CREATE TABLE proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
+            message_id TEXT NOT NULL, action TEXT NOT NULL, target_folder TEXT, reason TEXT NOT NULL);
+        """
+    )
+    conn.commit()
+    conn.close()
+    key = load_or_create_key(tmp_path / "secret.key")
+
+    with Database(path, key) as old:
+        with pytest.raises(SchemaOutOfDateError) as excinfo:
+            old.init_schema()
+
+    assert "old.db" in str(excinfo.value)
+    assert isinstance(excinfo.value, RuntimeError)
+
+
+def test_init_schema_accepts_a_fresh_database(tmp_path):
+    key = load_or_create_key(tmp_path / "secret.key")
+
+    with Database(tmp_path / "fresh.db", key) as fresh:
+        fresh.init_schema()
+        fresh.init_schema()
