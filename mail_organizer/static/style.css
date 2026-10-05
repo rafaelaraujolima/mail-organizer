@@ -1,0 +1,9 @@
+/* mail_organizer/static/style.css */
+body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+section { margin-bottom: 2rem; }
+.error { color: #b00020; }
+.proposal { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; }
+.proposal.suspicious { border-color: #b00020; background: #fff5f5; }
+.proposal .reason { color: #555; font-size: 0.9em; }
+.proposal button { margin-right: 0.5rem; }
+.proposal iframe { width: 100%; height: 300px; border: 1px solid #ccc; margin-top: 0.5rem; background: #fff; }
