@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -28,6 +29,15 @@ def test_build_gmail_authorize_url_includes_required_params():
     assert "access_type=offline" in url
     assert "prompt=consent" in url
     assert "state=state-abc" in url
+
+
+def test_gmail_authorize_url_requests_modify_and_settings_scopes():
+    url = build_gmail_authorize_url("client-123", "http://localhost:8000/cb", "state-abc")
+
+    scopes = parse_qs(urlparse(url).query)["scope"][0].split(" ")
+
+    assert "https://www.googleapis.com/auth/gmail.modify" in scopes
+    assert "https://www.googleapis.com/auth/gmail.settings.basic" in scopes
 
 
 def test_exchange_gmail_code_posts_and_returns_refresh_token():

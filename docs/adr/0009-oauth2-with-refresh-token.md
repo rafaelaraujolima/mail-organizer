@@ -25,3 +25,4 @@ Gmail and Graph require OAuth2. The app needs the authorization code flow (redir
 - App depends on user registering their own OAuth app.
 - The `state` param is generated in `authorize`, stored in memory, and validated and consumed (single use) at the callback before any code exchange (see ADR-0013).
 - Graph rotates refresh tokens and the new one is not persisted, so Graph accounts must be reconnected when the refresh token expires (~90 days of inactivity); the failure surfaces as `ProviderAuthError`.
+- Rule creation (`users.settings.filters`) needs `gmail.settings.basic`; accounts connected before this scope was requested must be reconnected to create rules.
