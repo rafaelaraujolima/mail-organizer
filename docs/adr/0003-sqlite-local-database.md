@@ -22,4 +22,5 @@ Connection opened with `check_same_thread=False` and writes serialized by `threa
 
 - No external server; backup is copying the file.
 - **No versioned migrations:** `CREATE TABLE IF NOT EXISTS` does not alter existing tables. A schema change (e.g., new columns in `proposals`) requires deleting the dev `app.db` or introducing a migration mechanism—to be decided in a new ADR before any release to others.
+- `init_schema` raises `SchemaOutOfDateError` for a database created before the proposal/job columns existed (delete it); still no migrations.
 - Multi-user evolution requires revisiting this decision.

@@ -33,6 +33,10 @@ def run_scan(
 
         processed = 0
         for message in messages:
+            preview = dict(
+                sender=message.sender, subject=message.subject, date=message.date,
+                snippet=(message.snippet or "")[:200],
+            )
             try:
                 heuristic_result = analyze_message(message)
                 classification = llm_client.classify(message, existing_folders, heuristic_result.flags)
@@ -44,10 +48,13 @@ def run_scan(
                         folder=None, suspicious=classification.suspicious, reason=classification.reason
                     )
                 proposal = build_proposal(message, heuristic_result, classification)
-                db.add_proposal(job_id, proposal.message_id, proposal.action, proposal.target_folder, proposal.reason)
+                db.add_proposal(
+                    job_id, proposal.message_id, proposal.action, proposal.target_folder, proposal.reason,
+                    **preview,
+                )
             except Exception as exc:
                 try:
-                    db.add_proposal(job_id, message.id, "error", None, f"Erro ao analisar: {exc}")
+                    db.add_proposal(job_id, message.id, "error", None, f"Erro ao analisar: {exc}", **preview)
                 except Exception:
                     # Recording the failure itself failed (e.g. transient DB error).
                     # Swallow it so the scan keeps going and still reaches

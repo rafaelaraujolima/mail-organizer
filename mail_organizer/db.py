@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     processed INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'running',
     error_message TEXT,
+    folder TEXT,
     FOREIGN KEY (account_id) REFERENCES accounts (account_id)
 );
 
@@ -30,13 +31,35 @@ CREATE TABLE IF NOT EXISTS proposals (
     action TEXT NOT NULL,
     target_folder TEXT,
     reason TEXT NOT NULL,
+    sender TEXT,
+    subject TEXT,
+    date TEXT,
+    snippet TEXT,
+    applied_status TEXT NOT NULL DEFAULT 'pending',
+    applied_error TEXT,
     FOREIGN KEY (job_id) REFERENCES jobs (job_id)
 );
 """
 
 
+EXPECTED_COLUMNS = {
+    "jobs": {
+        "job_id", "account_id", "total", "processed", "status", "error_message", "folder",
+    },
+    "proposals": {
+        "id", "job_id", "message_id", "action", "target_folder", "reason",
+        "sender", "subject", "date", "snippet", "applied_status", "applied_error",
+    },
+}
+
+
+class SchemaOutOfDateError(RuntimeError):
+    """The database file was created by an older version of the schema."""
+
+
 class Database:
     def __init__(self, path: pathlib.Path, key: bytes):
+        self._path = path
         self._key = key
         # check_same_thread=False so the connection survives being used from a
         # worker thread (e.g. FastAPI BackgroundTasks); self._lock serialises writes.
@@ -46,6 +69,16 @@ class Database:
 
     def init_schema(self) -> None:
         self._conn.executescript(SCHEMA)
+        # CREATE TABLE IF NOT EXISTS leaves old tables untouched (no migrations, ADR-0003):
+        # fail clearly instead of with an opaque "no such column" at request time.
+        for table, expected in EXPECTED_COLUMNS.items():
+            actual = {row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})")}
+            if expected - actual:
+                raise SchemaOutOfDateError(
+                    f"O banco de dados '{self._path}' foi criado por uma versão anterior "
+                    f"(tabela '{table}' sem as colunas: {', '.join(sorted(expected - actual))}). "
+                    "Apague o arquivo ou mova-o para outro lugar e inicie de novo."
+                )
         # Per-connection pragma: SQLite ignores declared FKs unless this is on.
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.commit()
@@ -98,11 +131,11 @@ class Database:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def create_job(self, job_id: str, account_id: str, total: int) -> None:
+    def create_job(self, job_id: str, account_id: str, total: int, folder: str | None = None) -> None:
         with self._lock:
             self._conn.execute(
-                "INSERT INTO jobs (job_id, account_id, total) VALUES (?, ?, ?)",
-                (job_id, account_id, total),
+                "INSERT INTO jobs (job_id, account_id, total, folder) VALUES (?, ?, ?, ?)",
+                (job_id, account_id, total, folder),
             )
             self._conn.commit()
 
@@ -129,21 +162,55 @@ class Database:
             self._conn.commit()
 
     def add_proposal(
-        self, job_id: str, message_id: str, action: str, target_folder: str | None, reason: str
+        self,
+        job_id: str,
+        message_id: str,
+        action: str,
+        target_folder: str | None,
+        reason: str,
+        sender: str | None = None,
+        subject: str | None = None,
+        date: str | None = None,
+        snippet: str | None = None,
     ) -> None:
         with self._lock:
             self._conn.execute(
                 """
-                INSERT INTO proposals (job_id, message_id, action, target_folder, reason)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO proposals
+                    (job_id, message_id, action, target_folder, reason, sender, subject, date, snippet)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (job_id, message_id, action, target_folder, reason),
+                (job_id, message_id, action, target_folder, reason, sender, subject, date, snippet),
             )
             self._conn.commit()
 
     def list_proposals(self, job_id: str) -> list[dict]:
         rows = self._conn.execute(
-            "SELECT message_id, action, target_folder, reason FROM proposals WHERE job_id = ? ORDER BY id",
+            """
+            SELECT id, message_id, action, target_folder, reason, applied_status, applied_error,
+                   sender, subject, date, snippet
+            FROM proposals WHERE job_id = ? ORDER BY id
+            """,
             (job_id,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_proposal(self, proposal_id: int) -> dict | None:
+        row = self._conn.execute(
+            """
+            SELECT id, job_id, message_id, action, target_folder, reason, applied_status, applied_error,
+                   sender, subject, date, snippet
+            FROM proposals WHERE id = ?
+            """,
+            (proposal_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def mark_proposal_applied(self, proposal_id: int, status: str, error: str | None = None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE proposals SET applied_status = ?, applied_error = ? "
+                "WHERE id = ? AND applied_status != 'applied'",
+                (status, error, proposal_id),
+            )
+            self._conn.commit()

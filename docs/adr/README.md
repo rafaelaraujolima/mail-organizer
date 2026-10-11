@@ -16,3 +16,4 @@ Technology and architecture decisions for Mail Organizer. Format described in [A
 | [0010](0010-html-sanitization-with-bleach.md) | HTML sanitization with bleach | Accepted |
 | [0011](0011-testing-strategy-pytest.md) | Testing strategy with pytest | Accepted |
 | [0012](0012-nothing-executes-without-approval.md) | Nothing executes without explicit approval | Accepted |
+| [0013](0013-local-api-hardening.md) | Local API hardening (host allowlist, required header, OAuth state) | Accepted |

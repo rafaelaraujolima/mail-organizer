@@ -18,7 +18,7 @@ wiring the tested pieces together for `uvicorn` to serve. The frontend is static
 HTML/JS/CSS served by FastAPI's `StaticFiles`, calling the REST API with `fetch` —
 no new frontend framework, no build step.
 
-**Tech Stack:** Python 3.11+, FastAPI + `uvicorn[standard]` (new), `bleach` (new,
+**Tech Stack:** Python 3.12+ (ADR-0002), FastAPI + `uvicorn[standard]` (new), `bleach` (new,
 HTML sanitization), `requests` (existing, used directly for OAuth token exchange —
 no new OAuth-specific library), `google-auth`/`google-api-python-client` (existing,
 already a dependency), `imapclient` (existing), `pytest` + `fastapi.testclient.TestClient`
@@ -89,10 +89,12 @@ it argues from).
 
 - [ ] **Step 1: Add dependencies**
 
-Edit `pyproject.toml`: add to `dependencies` and `dev`:
+Edit `pyproject.toml`: raise the Python floor to 3.12 (ADR-0002) and add to
+`dependencies` and `dev`:
 
 ```toml
 [project]
+requires-python = ">=3.12"
 dependencies = [
     "cryptography>=42.0",
     "google-api-python-client>=2.100",

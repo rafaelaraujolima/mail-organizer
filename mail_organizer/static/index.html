@@ -1,0 +1,52 @@
+<!-- mail_organizer/static/index.html -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Mail Organizer</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h1>Mail Organizer</h1>
+  <p id="status" class="error"></p>
+
+  <section id="accounts-section">
+    <h2>Contas conectadas</h2>
+    <ul id="account-list"></ul>
+
+    <h3>Conectar Gmail ou Outlook</h3>
+    <a id="connect-gmail" href="/accounts/gmail/authorize">Conectar Gmail</a>
+    <a id="connect-graph" href="/accounts/graph/authorize">Conectar Outlook</a>
+
+    <h3>Conectar conta IMAP</h3>
+    <form id="imap-form">
+      <input name="display_name" placeholder="Nome (ex. iCloud)" required>
+      <input name="host" placeholder="Host (ex. imap.mail.me.com)" required>
+      <input name="port" type="number" value="993" required>
+      <input name="username" placeholder="Usuário" required>
+      <input name="password" type="password" placeholder="Senha de app" required>
+      <button type="submit">Conectar</button>
+    </form>
+    <p id="imap-error" class="error"></p>
+  </section>
+
+  <section id="scan-section" hidden>
+    <h2>Escanear caixa</h2>
+    <select id="account-select"></select>
+    <select id="folder-select"></select>
+    <label>Últimos N dias (opcional): <input id="days-filter" type="number" min="1"></label>
+    <button id="start-scan">Iniciar scan</button>
+    <p id="job-status"></p>
+  </section>
+
+  <section id="proposals-section" hidden>
+    <h2>Propostas</h2>
+    <button id="approve-selected">Aprovar selecionadas</button>
+    <p id="batch-summary"></p>
+    <ul id="batch-errors" class="error"></ul>
+    <div id="proposal-list"></div>
+  </section>
+
+  <script src="/app.js"></script>
+</body>
+</html>

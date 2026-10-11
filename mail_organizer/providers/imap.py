@@ -57,6 +57,11 @@ class ImapProvider(EmailProvider):
         message_ids = self._client.search(search_criteria)
         return [self.get_message(str(msg_id)) for msg_id in message_ids]
 
+    @_translate_errors
+    def select_folder(self, folder: str) -> None:
+        self._client.select_folder(folder, readonly=False)
+        self._selected_folder = folder
+
     def _require_selected_folder(self) -> str:
         if self._selected_folder is None:
             raise ProviderError("No folder selected — call list_messages first")

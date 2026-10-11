@@ -265,3 +265,23 @@ def test_create_rule_raises_not_implemented():
 
     with pytest.raises(NotImplementedError):
         provider.create_rule(RuleCondition(domain="b.com"), "Promotions")
+
+
+def test_select_folder_selects_on_server_and_enables_message_operations():
+    client = MagicMock()
+    provider = ImapProvider(client)
+
+    provider.select_folder("INBOX")
+    provider.move_message("5", "Archive")
+
+    client.select_folder.assert_called_once_with("INBOX", readonly=False)
+    client.move.assert_called_once_with([5], "Archive")
+
+
+def test_select_folder_translates_server_errors():
+    client = MagicMock()
+    client.select_folder.side_effect = imaplib.IMAP4.error("no such mailbox")
+    provider = ImapProvider(client)
+
+    with pytest.raises(ProviderError):
+        provider.select_folder("Nope")
