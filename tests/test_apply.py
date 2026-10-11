@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 from mail_organizer.apply import ApplyResult, apply_proposal
 from mail_organizer.providers.base import Folder
 from mail_organizer.providers.errors import ProviderError
@@ -195,12 +197,26 @@ def test_create_rule_fails_when_provider_raises_not_implemented():
     result = apply_proposal(provider, _rule_proposal())
 
     assert result.success is False
+    provider.create_rule.assert_called_once()
+    assert "suporta" in result.message
 
 
-def test_create_rule_fails_on_incomplete_proposal():
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        dict(rule_value=None),
+        dict(rule_value=""),
+        dict(rule_kind="subject"),
+        dict(rule_kind=None),
+        dict(target_folder=None),
+    ],
+)
+def test_create_rule_fails_on_incomplete_proposal(overrides):
     provider = _rule_provider()
 
-    result = apply_proposal(provider, _rule_proposal(rule_value=None))
+    result = apply_proposal(provider, _rule_proposal(**overrides))
 
     assert result.success is False
+    assert "incompleta" in result.message
+    provider.list_folders.assert_not_called()
     provider.create_rule.assert_not_called()
