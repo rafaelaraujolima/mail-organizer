@@ -100,3 +100,107 @@ def test_apply_unknown_action_fails_without_calling_the_provider():
     assert result == ApplyResult(success=False, message="Ação desconhecida: archive")
     provider.move_message.assert_not_called()
     provider.delete_message.assert_not_called()
+
+
+def _rule_proposal(**overrides) -> dict:
+    fields = dict(
+        action="create_rule", message_id="", target_folder="Promotions",
+        rule_kind="sender", rule_value="news@shop.com", rule_match_count=3,
+    )
+    fields.update(overrides)
+    return _proposal(**fields)
+
+
+def _rule_provider(folders=None, rule_id="rule-1"):
+    provider = MagicMock()
+    provider.supports_rules.return_value = True
+    provider.list_folders.return_value = folders or [Folder(id="Label_7", name="Promotions")]
+    provider.create_rule.return_value = rule_id
+    return provider
+
+
+def test_create_rule_with_sender_condition_resolves_folder_and_returns_rule_id():
+    provider = _rule_provider()
+
+    result = apply_proposal(provider, _rule_proposal())
+
+    assert result.success is True
+    assert result.rule_id == "rule-1"
+    condition, folder_id = provider.create_rule.call_args.args
+    assert condition.sender == "news@shop.com"
+    assert condition.domain is None
+    assert folder_id == "Label_7"
+    provider.move_message.assert_not_called()
+    provider.delete_message.assert_not_called()
+
+
+def test_create_rule_with_domain_condition():
+    provider = _rule_provider()
+
+    result = apply_proposal(
+        provider, _rule_proposal(rule_kind="domain", rule_value="shop.com")
+    )
+
+    assert result.success is True
+    condition = provider.create_rule.call_args.args[0]
+    assert condition.domain == "shop.com"
+    assert condition.sender is None
+
+
+def test_create_rule_fails_when_provider_does_not_support_rules():
+    provider = _rule_provider()
+    provider.supports_rules.return_value = False
+
+    result = apply_proposal(provider, _rule_proposal())
+
+    assert result.success is False
+    assert "suporta" in result.message
+    provider.create_rule.assert_not_called()
+
+
+def test_create_rule_fails_clearly_when_folder_no_longer_exists():
+    provider = _rule_provider(folders=[Folder(id="INBOX", name="INBOX")])
+
+    result = apply_proposal(provider, _rule_proposal())
+
+    assert result.success is False
+    assert "Promotions" in result.message
+    provider.create_rule.assert_not_called()
+
+
+def test_create_rule_fails_when_list_folders_raises_provider_error():
+    provider = _rule_provider()
+    provider.list_folders.side_effect = ProviderError("auth expired")
+
+    result = apply_proposal(provider, _rule_proposal())
+
+    assert result.success is False
+    assert "auth expired" in result.message
+
+
+def test_create_rule_fails_when_provider_raises_provider_error():
+    provider = _rule_provider()
+    provider.create_rule.side_effect = ProviderError("quota exceeded")
+
+    result = apply_proposal(provider, _rule_proposal())
+
+    assert result.success is False
+    assert "quota exceeded" in result.message
+
+
+def test_create_rule_fails_when_provider_raises_not_implemented():
+    provider = _rule_provider()
+    provider.create_rule.side_effect = NotImplementedError("no rules")
+
+    result = apply_proposal(provider, _rule_proposal())
+
+    assert result.success is False
+
+
+def test_create_rule_fails_on_incomplete_proposal():
+    provider = _rule_provider()
+
+    result = apply_proposal(provider, _rule_proposal(rule_value=None))
+
+    assert result.success is False
+    provider.create_rule.assert_not_called()
