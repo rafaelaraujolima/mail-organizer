@@ -41,18 +41,30 @@ class _FailingMoveProvider(_FakeProvider):
         raise ProviderError("rate limited")
 
 
+class _RuleProvider(_FakeProvider):
+    created = []
+
+    def supports_rules(self):
+        return True
+
+    def create_rule(self, condition, target_folder):
+        _RuleProvider.created.append((condition.sender, condition.domain, target_folder))
+        return "rule-1"
+
+
 def _broken_factory(credentials):
     raise ProviderAuthError("token refresh failed")
 
 
 @pytest.fixture
 def provider_factories():
-    return {"fake": _FakeProvider, "failing": _FailingMoveProvider, "broken": _broken_factory}
+    return {"fake": _FakeProvider, "failing": _FailingMoveProvider, "broken": _broken_factory, "rule": _RuleProvider}
 
 
 @pytest.fixture(autouse=True)
 def _reset_selected_folders():
     SELECTED_FOLDERS.clear()
+    _RuleProvider.created.clear()
 
 
 def _seed_proposal(db, provider_type="fake", action="move", target_folder="Promotions", folder=None):
@@ -319,3 +331,107 @@ def test_single_approve_returns_502_when_provider_raises_unexpected_error(db):
     proposal = db.get_proposal(proposal_id)
     assert proposal["applied_status"] == "pending"
     assert "slow" in proposal["applied_error"]
+
+
+def _seed_rule_proposal(db, provider_type="rule", folder_name="Promotions", rule_kind="sender", rule_value="news@shop.com"):
+    db.save_account("acc-1", provider_type, "x", {})
+    db.create_job("job-1", "acc-1", total=0)
+    db.add_proposal(
+        "job-1", "", "create_rule", folder_name, "3 emails deste lote vão para Promotions",
+        sender=rule_value, rule_kind=rule_kind, rule_value=rule_value, rule_match_count=3,
+    )
+    return db.list_proposals("job-1")[0]["id"]
+
+
+def test_approve_rule_creates_it_and_records_it(client, db):
+    proposal_id = _seed_rule_proposal(db)
+
+    response = client.post(f"/proposals/{proposal_id}/approve")
+
+    assert response.status_code == 200
+    assert _RuleProvider.created == [("news@shop.com", None, "Label_7")]
+    assert db.get_proposal(proposal_id)["applied_status"] == "applied"
+    assert db.list_applied_rules("acc-1") == [
+        {"kind": "sender", "value": "news@shop.com", "folder": "Promotions", "provider_rule_id": "rule-1"}
+    ]
+
+
+def test_approve_domain_rule_uses_a_domain_condition(client, db):
+    proposal_id = _seed_rule_proposal(db, rule_kind="domain", rule_value="shop.com")
+
+    response = client.post(f"/proposals/{proposal_id}/approve")
+
+    assert response.status_code == 200
+    assert _RuleProvider.created == [(None, "shop.com", "Label_7")]
+
+
+def test_approving_a_rule_twice_creates_it_once(client, db):
+    proposal_id = _seed_rule_proposal(db)
+    client.post(f"/proposals/{proposal_id}/approve")
+
+    response = client.post(f"/proposals/{proposal_id}/approve")
+
+    assert response.status_code == 409
+    assert len(_RuleProvider.created) == 1
+
+
+def test_approve_rule_fails_when_target_folder_no_longer_exists(client, db):
+    proposal_id = _seed_rule_proposal(db, folder_name="Ghost Folder")
+
+    response = client.post(f"/proposals/{proposal_id}/approve")
+
+    assert response.status_code == 502
+    assert "Ghost Folder" in response.json()["detail"]
+    proposal = db.get_proposal(proposal_id)
+    assert proposal["applied_status"] == "pending"
+    assert proposal["applied_error"]
+    assert db.list_applied_rules("acc-1") == []
+    assert _RuleProvider.created == []
+
+
+def test_approve_rule_fails_for_a_provider_without_rule_support(client, db):
+    proposal_id = _seed_rule_proposal(db, provider_type="fake")
+
+    response = client.post(f"/proposals/{proposal_id}/approve")
+
+    assert response.status_code == 502
+    assert db.get_proposal(proposal_id)["applied_status"] == "pending"
+    assert db.list_applied_rules("acc-1") == []
+
+
+def test_rule_stays_applied_when_recording_it_locally_fails(client, db, monkeypatch):
+    proposal_id = _seed_rule_proposal(db)
+    calls = []
+
+    def boom(*args, **kwargs):
+        calls.append(args)
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(db, "add_applied_rule", boom)
+
+    response = client.post(f"/proposals/{proposal_id}/approve")
+
+    assert response.status_code == 200
+    assert calls == [("acc-1", "sender", "news@shop.com", "Promotions", "rule-1")]
+    assert db.get_proposal(proposal_id)["applied_status"] == "applied"
+    assert client.post(f"/proposals/{proposal_id}/approve").status_code == 409
+    assert len(_RuleProvider.created) == 1
+
+
+def test_batch_approve_applies_email_and_rule_proposals_independently(client, db):
+    db.save_account("acc-1", "rule", "x", {})
+    db.create_job("job-1", "acc-1", total=1)
+    db.add_proposal("job-1", "msg-1", "move", "Promotions", "r1")
+    db.add_proposal(
+        "job-1", "", "create_rule", ("Ghost Folder"), "r2",
+        sender="news@shop.com", rule_kind="sender", rule_value="news@shop.com", rule_match_count=3,
+    )
+    ids = [p["id"] for p in db.list_proposals("job-1")]
+
+    response = client.post("/proposals/batch-approve", json={"ids": ids})
+
+    results = response.json()
+    assert results[str(ids[0])] == "ok"
+    assert results[str(ids[1])].startswith("error:")
+    assert db.get_proposal(ids[0])["applied_status"] == "applied"
+    assert db.get_proposal(ids[1])["applied_status"] == "pending"

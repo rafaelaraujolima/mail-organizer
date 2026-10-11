@@ -48,6 +48,17 @@ def _apply_and_record(db: Database, service: AccountService, proposal: dict) -> 
         db.mark_proposal_applied(proposal["id"], "pending", message)
         return {"success": False, "message": message}
 
+    if result.success and proposal["action"] == "create_rule":
+        try:
+            db.add_applied_rule(
+                job["account_id"], proposal["rule_kind"], proposal["rule_value"],
+                proposal["target_folder"], result.rule_id,
+            )
+        except Exception:
+            # The rule already exists on the server. A bookkeeping failure must
+            # not leave the proposal retryable: a retry would create a duplicate.
+            pass
+
     db.mark_proposal_applied(
         proposal["id"],
         "applied" if result.success else "pending",
