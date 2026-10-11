@@ -3,10 +3,12 @@
 // textContent (ADR-0006). The sole HTML sink is a sandboxed iframe srcdoc.
 const ACTION_LABELS = {
   move: "Mover",
+  create_rule: "Regras sugeridas",
   flag_delete: "Possível lixo/phishing",
   keep: "Manter",
   error: "Erro",
 };
+const GROUP_ORDER = ["move", "create_rule", "flag_delete", "keep", "error"];
 
 function byId(id) {
   return document.getElementById(id);
@@ -208,19 +210,34 @@ function buildProposal(proposal) {
   checkbox.disabled = !pending;
   div.appendChild(checkbox);
 
-  div.appendChild(makeEl("strong", { text: ACTION_LABELS[proposal.action] || String(proposal.action) }));
-  if (proposal.target_folder) {
-    div.appendChild(makeEl("span", { text: ` → ${proposal.target_folder}` }));
+  const isRule = proposal.action === "create_rule";
+  if (isRule) {
+    const kindLabel = proposal.rule_kind === "domain" ? "do domínio" : "de";
+    div.appendChild(
+      makeEl("strong", {
+        text: `Criar regra: emails ${kindLabel} ${proposal.rule_value || ""} → mover para ${proposal.target_folder || ""}`,
+      })
+    );
+    if (proposal.rule_match_count) {
+      div.appendChild(
+        makeEl("div", { className: "preview", text: `${proposal.rule_match_count} emails neste lote` })
+      );
+    }
+  } else {
+    div.appendChild(makeEl("strong", { text: ACTION_LABELS[proposal.action] || String(proposal.action) }));
+    if (proposal.target_folder) {
+      div.appendChild(makeEl("span", { text: ` → ${proposal.target_folder}` }));
+    }
+    // Plain-text preview of the message; older rows may lack these fields.
+    for (const [label, value] of [
+      ["De:", proposal.sender],
+      ["Assunto:", proposal.subject],
+      ["Data:", proposal.date],
+    ]) {
+      if (value) div.appendChild(makeEl("div", { className: "preview", text: `${label} ${value}` }));
+    }
+    if (proposal.snippet) div.appendChild(makeEl("div", { className: "snippet", text: proposal.snippet }));
   }
-  // Plain-text preview of the message; older rows may lack these fields.
-  for (const [label, value] of [
-    ["De:", proposal.sender],
-    ["Assunto:", proposal.subject],
-    ["Data:", proposal.date],
-  ]) {
-    if (value) div.appendChild(makeEl("div", { className: "preview", text: `${label} ${value}` }));
-  }
-  if (proposal.snippet) div.appendChild(makeEl("div", { className: "snippet", text: proposal.snippet }));
   div.appendChild(makeEl("div", { className: "reason", text: proposal.reason || "" }));
   div.appendChild(
     makeEl("div", {
@@ -261,8 +278,9 @@ function buildProposal(proposal) {
     await loadProposals(failure);
   });
 
-  const view = makeEl("button", { className: "view-content", text: "Ver conteúdo" });
-  view.addEventListener("click", () => toggleContent(proposal, holder, errorEl, view));
+  // Rule proposals have no message, so there is nothing to preview.
+  const view = isRule ? null : makeEl("button", { className: "view-content", text: "Ver conteúdo" });
+  if (view) view.addEventListener("click", () => toggleContent(proposal, holder, errorEl, view));
 
   function lockActions() {
     approve.disabled = true;
@@ -270,7 +288,11 @@ function buildProposal(proposal) {
     checkbox.disabled = true;
   }
 
-  div.append(approve, reject, view, errorEl, holder);
+  if (view) {
+    div.append(approve, reject, view, errorEl, holder);
+  } else {
+    div.append(approve, reject, errorEl);
+  }
   return div;
 }
 
@@ -280,12 +302,24 @@ async function loadProposals(keepError) {
     const proposals = await fetchJSON(`/jobs/${encodeURIComponent(currentJobId)}/proposals`);
     const container = byId("proposal-list");
     clearChildren(container);
-    for (const proposal of proposals) {
-      const node = buildProposal(proposal);
-      if (keepError && keepError.id === proposal.id) {
-        node.querySelector(".proposal-error").textContent = keepError.message;
+    const groups = GROUP_ORDER.map((action) => [
+      ACTION_LABELS[action],
+      proposals.filter((proposal) => proposal.action === action),
+    ]);
+    // An action this UI does not know yet must still be visible, never silently dropped.
+    const unknown = proposals.filter((proposal) => !GROUP_ORDER.includes(proposal.action));
+    if (unknown.length > 0) groups.push(["Outras", unknown]);
+
+    for (const [title, group] of groups) {
+      if (group.length === 0) continue;
+      container.appendChild(makeEl("h3", { className: "group-title", text: `${title} (${group.length})` }));
+      for (const proposal of group) {
+        const node = buildProposal(proposal);
+        if (keepError && keepError.id === proposal.id) {
+          node.querySelector(".proposal-error").textContent = keepError.message;
+        }
+        container.appendChild(node);
       }
-      container.appendChild(node);
     }
   } catch (err) {
     showStatus(errorMessage(err));
