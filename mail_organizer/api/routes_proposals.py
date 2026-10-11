@@ -28,6 +28,18 @@ def _open_provider(service: AccountService, job: dict):
 
 def _apply_and_record(db: Database, service: AccountService, proposal: dict) -> dict:
     job = db.get_job(proposal["job_id"])
+
+    if proposal["action"] == "create_rule":
+        # Runs under _APPLY_LOCK and before any provider call: an equivalent rule
+        # already exists (or was created and only its bookkeeping failed), and a
+        # second one would be a duplicate or conflicting server-side filter.
+        wanted = (proposal["rule_kind"], (proposal["rule_value"] or "").lower())
+        for existing in db.list_applied_rules(job["account_id"]):
+            if (existing["kind"], existing["value"].lower()) == wanted:
+                message = f"Já existe uma regra para {proposal['rule_value']} (pasta {existing['folder']})"
+                db.mark_proposal_applied(proposal["id"], "pending", message)
+                return {"success": False, "message": message}
+
     try:
         provider = _open_provider(service, job)
     except (LookupError, ValueError, ProviderError, OSError) as exc:

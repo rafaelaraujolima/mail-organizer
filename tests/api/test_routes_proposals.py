@@ -435,3 +435,68 @@ def test_batch_approve_applies_email_and_rule_proposals_independently(client, db
     assert results[str(ids[1])].startswith("error:")
     assert db.get_proposal(ids[0])["applied_status"] == "applied"
     assert db.get_proposal(ids[1])["applied_status"] == "pending"
+
+
+def _add_rule_proposal(db, job_id, rule_value, rule_kind="sender"):
+    db.add_proposal(
+        job_id, "", "create_rule", "Promotions", "3 de 3 emails deste lote vão para Promotions",
+        sender=rule_value, rule_kind=rule_kind, rule_value=rule_value, rule_match_count=3,
+    )
+    return db.list_proposals(job_id)[-1]["id"]
+
+
+def test_second_proposal_for_an_existing_rule_does_not_call_the_provider(client, db):
+    first_id = _seed_rule_proposal(db)
+    db.create_job("job-2", "acc-1", total=0)
+    second_id = _add_rule_proposal(db, "job-2", "News@Shop.com")
+
+    assert client.post(f"/proposals/{first_id}/approve").status_code == 200
+    assert len(_RuleProvider.created) == 1
+
+    response = client.post(f"/proposals/{second_id}/approve")
+
+    assert response.status_code == 502
+    assert "news@shop.com" in response.json()["detail"].lower()
+    assert "Promotions" in response.json()["detail"]
+    assert len(_RuleProvider.created) == 1
+    second = db.get_proposal(second_id)
+    assert second["applied_status"] == "pending"
+    assert second["applied_error"]
+    assert len(db.list_applied_rules("acc-1")) == 1
+
+
+def test_proposal_for_a_different_sender_is_still_applied(client, db):
+    first_id = _seed_rule_proposal(db)
+    db.create_job("job-2", "acc-1", total=0)
+    other_id = _add_rule_proposal(db, "job-2", "other@shop.com")
+
+    assert client.post(f"/proposals/{first_id}/approve").status_code == 200
+    response = client.post(f"/proposals/{other_id}/approve")
+
+    assert response.status_code == 200
+    assert len(_RuleProvider.created) == 2
+    assert len(db.list_applied_rules("acc-1")) == 2
+
+
+def test_rule_already_recorded_locally_is_not_created_again_on_retry(client, db):
+    proposal_id = _seed_rule_proposal(db)
+    db.add_applied_rule("acc-1", "sender", "news@shop.com", "Promotions", "rule-0")
+
+    response = client.post(f"/proposals/{proposal_id}/approve")
+
+    assert response.status_code == 502
+    assert _RuleProvider.created == []
+    assert db.get_proposal(proposal_id)["applied_status"] == "pending"
+    assert len(db.list_applied_rules("acc-1")) == 1
+
+
+def test_same_value_with_a_different_kind_is_not_a_duplicate(client, db):
+    db.save_account("acc-1", "rule", "x", {})
+    db.create_job("job-1", "acc-1", total=0)
+    db.add_applied_rule("acc-1", "domain", "shop.com", "Promotions", "rule-0")
+    proposal_id = _add_rule_proposal(db, "job-1", "shop.com", rule_kind="sender")
+
+    response = client.post(f"/proposals/{proposal_id}/approve")
+
+    assert response.status_code == 200
+    assert len(_RuleProvider.created) == 1
