@@ -54,6 +54,16 @@ ALLOWED_HOSTS = list(dict.fromkeys(h for h in ["localhost", "127.0.0.1", urlpars
 
 STATIC_DIR = pathlib.Path(__file__).resolve().parent.parent / "static"
 
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except ValueError:
+        return default
+    return value if value >= 1 else default
+
+
+RULE_MIN_EMAILS = _positive_int_env("RULE_MIN_EMAILS", 3)
+
 app = create_app(
     db,
     provider_factories,
@@ -62,4 +72,5 @@ app = create_app(
     ollama_model=os.environ.get("OLLAMA_MODEL", "llama3.2:3b"),
     static_dir=STATIC_DIR,
     allowed_hosts=ALLOWED_HOSTS,
+    rule_min_emails=RULE_MIN_EMAILS,
 )

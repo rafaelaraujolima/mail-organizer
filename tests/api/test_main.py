@@ -88,3 +88,27 @@ def test_main_allows_localhost_and_the_app_base_url_host(tmp_path, monkeypatch):
     finally:
         module.db.close()
         sys.modules.pop("mail_organizer.api.main", None)
+
+
+def _import_main(tmp_path, monkeypatch, **env):
+    monkeypatch.setenv("MAIL_ORGANIZER_DATA_DIR", str(tmp_path))
+    for name in ("APP_BASE_URL", "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET",
+                 "GRAPH_CLIENT_ID", "GRAPH_CLIENT_SECRET", "RULE_MIN_EMAILS"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    sys.modules.pop("mail_organizer.api.main", None)
+    return importlib.import_module("mail_organizer.api.main")
+
+
+@pytest.mark.parametrize(
+    "raw,expected", [(None, 3), ("5", 5), ("1", 1), ("0", 3), ("-2", 3), ("abc", 3)]
+)
+def test_main_reads_rule_min_emails_with_a_safe_default(tmp_path, monkeypatch, raw, expected):
+    env = {} if raw is None else {"RULE_MIN_EMAILS": raw}
+    module = _import_main(tmp_path, monkeypatch, **env)
+    try:
+        assert module.app.state.rule_min_emails == expected
+    finally:
+        module.db.close()
+        sys.modules.pop("mail_organizer.api.main", None)
