@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import MagicMock
 
 from mail_organizer.llm import ClassificationResult, OllamaUnavailableError
@@ -256,8 +257,28 @@ def test_scan_proposes_a_sender_rule_when_threshold_is_reached(tmp_path):
     assert rule["rule_value"] == "news@shop.com"
     assert rule["rule_match_count"] == 3
     assert rule["sender"] == "news@shop.com"
-    assert "3" in rule["reason"] and "Promotions" in rule["reason"]
+    assert rule["reason"] == "3 de 3 emails deste lote vão para Promotions"
     assert db.get_job("job-1")["status"] == "completed"
+    db.close()
+
+
+def test_rule_reason_discloses_the_sender_emails_that_are_not_moves(tmp_path):
+    db = _real_db(tmp_path)
+    db.create_job("job-1", "acc-1", total=5)
+    llm_client = MagicMock()
+    promo = ClassificationResult(folder="Promotions", suspicious=False, reason="Newsletter")
+    nothing = ClassificationResult(folder=None, suspicious=False, reason="")
+    llm_client.classify.side_effect = [promo, promo, promo, nothing, nothing]
+    messages = [_make_message(f"msg-{i}", sender="news@shop.com") for i in range(5)]
+
+    run_scan(db, _rules_provider(), llm_client, "job-1", messages=messages, rule_threshold=3)
+
+    actions = sorted(p["action"] for p in db.list_proposals("job-1") if p["action"] != "create_rule")
+    assert actions == ["keep", "keep", "move", "move", "move"]
+    rules = _rule_proposals(db, "job-1")
+    assert len(rules) == 1
+    assert rules[0]["rule_match_count"] == 3
+    assert rules[0]["reason"] == "3 de 5 emails deste lote vão para Promotions"
     db.close()
 
 
@@ -318,18 +339,26 @@ def test_scan_skips_a_rule_that_was_already_applied_for_the_account(tmp_path):
     db.close()
 
 
-def test_rule_detection_failure_does_not_fail_the_scan(tmp_path, monkeypatch):
+def test_rule_detection_failure_does_not_fail_the_scan(tmp_path, monkeypatch, caplog):
     db = _real_db(tmp_path)
     db.create_job("job-1", "acc-1", total=3)
     messages = [_make_message(f"msg-{i}", sender="news@shop.com") for i in range(3)]
+    calls = []
 
     def boom(*args, **kwargs):
+        calls.append(1)
         raise RuntimeError("detector exploded")
 
     monkeypatch.setattr("mail_organizer.scan.detect_rule_candidates", boom)
 
-    run_scan(db, _rules_provider(), _promo_llm(), "job-1", messages=messages, rule_threshold=3)
+    with caplog.at_level(logging.WARNING, logger="mail_organizer.scan"):
+        run_scan(db, _rules_provider(), _promo_llm(), "job-1", messages=messages, rule_threshold=3)
 
+    assert len(calls) == 1
+    records = [r for r in caplog.records if r.name == "mail_organizer.scan"]
+    assert len(records) == 1
+    assert "job-1" in records[0].getMessage()
+    assert records[0].exc_info is not None
     job = db.get_job("job-1")
     assert job["status"] == "completed"
     assert len(db.list_proposals("job-1")) == 3

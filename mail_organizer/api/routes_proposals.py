@@ -1,3 +1,4 @@
+import logging
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,6 +10,8 @@ from mail_organizer.apply import apply_proposal
 from mail_organizer.db import Database
 from mail_organizer.providers.errors import ProviderError
 from mail_organizer.sanitize import sanitize_html
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["proposals"])
 
@@ -69,7 +72,9 @@ def _apply_and_record(db: Database, service: AccountService, proposal: dict) -> 
         except Exception:
             # The rule already exists on the server. A bookkeeping failure must
             # not leave the proposal retryable: a retry would create a duplicate.
-            pass
+            logger.warning(
+                "Rule created but not recorded locally for proposal %s", proposal["id"], exc_info=True
+            )
 
     db.mark_proposal_applied(
         proposal["id"],

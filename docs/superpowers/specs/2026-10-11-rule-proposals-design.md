@@ -45,8 +45,8 @@ the server, tuning the threshold from the UI.
   its best folder has `count >= threshold` **and** strictly more emails than any other
   folder for that sender; otherwise that sender produces nothing.
 - Step 2, domains: emails whose sender produced a candidate in step 1 are removed. The
-  rest are grouped by `(domain, target_folder)` with the same threshold and strict
-  majority rule.
+  rest are grouped by `(domain, target_folder)` with the same threshold and the same
+  rule (strictly more emails than any other folder: plurality with a strict lead).
 - A candidate is dropped if `(kind, value)` is already in `existing_rules`, whatever the
   folder (two rules for one condition would conflict).
 - A candidate value must match a strict pattern before it can become a proposal: sender
@@ -64,8 +64,12 @@ the server, tuning the threshold from the UI.
   `db.list_applied_rules(account_id)`, run detection and store each candidate with
   `db.add_proposal(job_id, "", "create_rule", folder, reason, rule_kind=..., rule_value=...,
   rule_match_count=...)`.
-- `reason` is a generated Portuguese sentence, e.g. "3 emails deste lote vão para
-  Promotions" (UI strings stay Portuguese, as in the rest of the product).
+- `reason` is a generated Portuguese sentence of the form "{count} de {total} emails
+  deste lote vão para {folder}", e.g. "3 de 5 emails deste lote vão para Promotions"
+  (UI strings stay Portuguese, as in the rest of the product). `total` is the number of
+  emails of the sender (or of the uncovered senders of the domain) that were considered
+  for the group, whatever their action or folder; `count` is the number that go to the
+  folder.
 - Any exception in this block is swallowed (the job still ends `completed`, without rule
   proposals). It must never turn a finished scan into a failed one.
 - The account id comes from `db.get_job(job_id)["account_id"]`.
@@ -135,7 +139,7 @@ the server, tuning the threshold from the UI.
 
 ## Testing
 
-- `tests/test_rules.py`: threshold boundaries (2 vs 3), strict majority and tie, sender
+- `tests/test_rules.py`: threshold boundaries (2 vs 3), plurality with a strict lead and tie, sender
   beats domain, domain built only from uncovered emails, existing rule suppression
   (any folder), invalid sender skipped, only `move` counts, deterministic order,
   configurable threshold.
@@ -165,3 +169,6 @@ the server, tuning the threshold from the UI.
 - The system-folder denylist (`rules.SYSTEM_FOLDER_NAMES`, plus any `category_*` name) is
   name-based, so localized Outlook folder names (for example Portuguese "Itens
   Excluídos") are not recognised; the human approval is the remaining safeguard.
+- Dominance only looks at a sender's `move` proposals and ignores its other proposals
+  (keep, delete, other folders), so a rule can be proposed for a sender where most
+  emails are not moves; the reason text discloses this ("3 de 5").

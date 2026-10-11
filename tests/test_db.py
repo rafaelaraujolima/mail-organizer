@@ -235,6 +235,10 @@ def test_mark_proposal_applied_never_touches_an_applied_row(db):
     assert proposal["applied_error"] is None
 
 
+def _column_names(database, table):
+    return {row["name"] for row in database._conn.execute(f"PRAGMA table_info({table})")}
+
+
 def _old_shape_database(path):
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -280,6 +284,64 @@ def test_init_schema_migration_is_idempotent(tmp_path):
     with Database(path, key) as old:
         old.init_schema()
         old.init_schema()
+
+        assert _column_names(old, "jobs") == {
+            "job_id", "account_id", "total", "processed", "status", "error_message", "folder",
+        }
+        assert _column_names(old, "proposals") == {
+            "id", "job_id", "message_id", "action", "target_folder", "reason", "sender", "subject",
+            "date", "snippet", "applied_status", "applied_error", "rule_kind", "rule_value",
+            "rule_match_count",
+        }
+        proposal = old.get_proposal(1)
+        assert proposal["message_id"] == "msg-1"
+        assert proposal["reason"] == "old row"
+        assert old.get_job("job-1")["total"] == 1
+
+
+def test_init_schema_migrates_the_previous_release_schema_keeping_its_rows(tmp_path):
+    path = tmp_path / "previous.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE accounts (account_id TEXT PRIMARY KEY, provider TEXT NOT NULL,
+            display_name TEXT NOT NULL, credentials_encrypted BLOB NOT NULL);
+        CREATE TABLE jobs (job_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, total INTEGER NOT NULL,
+            processed INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'running',
+            error_message TEXT, folder TEXT,
+            FOREIGN KEY (account_id) REFERENCES accounts (account_id));
+        CREATE TABLE proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
+            message_id TEXT NOT NULL, action TEXT NOT NULL, target_folder TEXT, reason TEXT NOT NULL,
+            sender TEXT, subject TEXT, date TEXT, snippet TEXT,
+            applied_status TEXT NOT NULL DEFAULT 'pending', applied_error TEXT,
+            FOREIGN KEY (job_id) REFERENCES jobs (job_id));
+        INSERT INTO accounts VALUES ('acc-1', 'imap', 'prev', X'00');
+        INSERT INTO jobs (job_id, account_id, total, folder) VALUES ('job-1', 'acc-1', 2, 'INBOX');
+        INSERT INTO proposals (job_id, message_id, action, target_folder, reason, sender, subject,
+            date, snippet, applied_status, applied_error)
+            VALUES ('job-1', 'msg-1', 'move', 'Promotions', 'r', 'a@b.com', 'Hi', '2026-01-01', 'snip',
+                'applied', NULL),
+                   ('job-1', 'msg-2', 'keep', NULL, 'r2', 'c@d.com', 'Yo', '2026-01-02', 'sn',
+                'pending', 'oops');
+        """
+    )
+    conn.commit()
+    conn.close()
+    key = load_or_create_key(tmp_path / "secret.key")
+
+    with Database(path, key) as migrated:
+        migrated.init_schema()
+
+        assert {"rule_kind", "rule_value", "rule_match_count"} <= _column_names(migrated, "proposals")
+        first, second = migrated.list_proposals("job-1")
+        assert (first["message_id"], first["sender"], first["applied_status"]) == ("msg-1", "a@b.com", "applied")
+        assert (second["message_id"], second["applied_error"]) == ("msg-2", "oops")
+        for row in (first, second):
+            assert row["rule_kind"] is None
+            assert row["rule_value"] is None
+            assert row["rule_match_count"] is None
+        assert migrated.get_job("job-1")["folder"] == "INBOX"
+        assert migrated.list_applied_rules("acc-1") == []
 
 
 def test_init_schema_raises_schema_out_of_date_when_an_alter_fails(tmp_path):
@@ -366,3 +428,13 @@ def test_init_schema_accepts_a_fresh_database(tmp_path):
     with Database(tmp_path / "fresh.db", key) as fresh:
         fresh.init_schema()
         fresh.init_schema()
+
+
+def test_add_applied_rule_for_an_unknown_account_violates_the_foreign_key(db):
+    with pytest.raises(sqlite3.IntegrityError):
+        db.add_applied_rule("ghost", "sender", "news@shop.com", "Promotions", "rule-1")
+
+    # Positive control: the same call succeeds once the account exists.
+    db.save_account("acc-1", "gmail", "x", {})
+    db.add_applied_rule("acc-1", "sender", "news@shop.com", "Promotions", "rule-1")
+    assert len(db.list_applied_rules("acc-1")) == 1

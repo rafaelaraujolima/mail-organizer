@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -399,7 +400,7 @@ def test_approve_rule_fails_for_a_provider_without_rule_support(client, db):
     assert db.list_applied_rules("acc-1") == []
 
 
-def test_rule_stays_applied_when_recording_it_locally_fails(client, db, monkeypatch):
+def test_rule_stays_applied_when_recording_it_locally_fails(client, db, monkeypatch, caplog):
     proposal_id = _seed_rule_proposal(db)
     calls = []
 
@@ -409,9 +410,14 @@ def test_rule_stays_applied_when_recording_it_locally_fails(client, db, monkeypa
 
     monkeypatch.setattr(db, "add_applied_rule", boom)
 
-    response = client.post(f"/proposals/{proposal_id}/approve")
+    with caplog.at_level(logging.WARNING, logger="mail_organizer.api.routes_proposals"):
+        response = client.post(f"/proposals/{proposal_id}/approve")
 
     assert response.status_code == 200
+    records = [r for r in caplog.records if r.name == "mail_organizer.api.routes_proposals"]
+    assert len(records) == 1
+    assert str(proposal_id) in records[0].getMessage()
+    assert records[0].exc_info is not None
     assert calls == [("acc-1", "sender", "news@shop.com", "Promotions", "rule-1")]
     assert db.get_proposal(proposal_id)["applied_status"] == "applied"
     assert client.post(f"/proposals/{proposal_id}/approve").status_code == 409

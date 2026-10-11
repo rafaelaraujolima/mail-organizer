@@ -40,7 +40,8 @@ class RuleCandidate:
     kind: str  # "sender" | "domain"
     value: str
     folder: str
-    count: int
+    count: int  # emails that go to `folder`
+    total: int  # emails of the group considered, whatever their action or folder
 
 
 def _dominant_folder(folders: Counter, threshold: int) -> tuple[str, int] | None:
@@ -58,10 +59,20 @@ def detect_rule_candidates(
     existing_rules: list[tuple[str, str]],
     threshold: int = 3,
 ) -> list[RuleCandidate]:
+    threshold = max(int(threshold), 1)
     existing = {(kind, value.lower()) for kind, value in existing_rules}
 
+    # Every email of a sender is counted in `total` so the reason text can
+    # disclose how many of them the rule does not cover; dominance itself only
+    # looks at the moves.
+    totals: Counter = Counter()
     by_sender: dict[str, Counter] = defaultdict(Counter)
     for proposal in proposals:
+        if proposal.get("action") == "create_rule":
+            continue
+        listed_sender = (proposal.get("sender") or "").strip().lower()
+        if _valid_sender(listed_sender):
+            totals[listed_sender] += 1
         if proposal.get("action") != "move" or not proposal.get("target_folder"):
             continue
         if is_system_folder(proposal["target_folder"]):
@@ -82,9 +93,10 @@ def detect_rule_candidates(
         covered.add(sender)
         if ("sender", sender) in existing:
             continue
-        candidates.append(RuleCandidate("sender", sender, dominant[0], dominant[1]))
+        candidates.append(RuleCandidate("sender", sender, dominant[0], dominant[1], totals[sender]))
 
     by_domain: dict[str, Counter] = defaultdict(Counter)
+    domain_totals: Counter = Counter()
     for sender, folders in by_sender.items():
         if sender in covered:
             continue
@@ -92,12 +104,18 @@ def detect_rule_candidates(
         if not _valid_domain(domain):
             continue
         by_domain[domain].update(folders)
+    for sender, total in totals.items():
+        if sender in covered:
+            continue
+        domain = sender.split("@", 1)[1]
+        if domain in by_domain:
+            domain_totals[domain] += total
 
     for domain, folders in by_domain.items():
         dominant = _dominant_folder(folders, threshold)
         if dominant is None or ("domain", domain) in existing:
             continue
-        candidates.append(RuleCandidate("domain", domain, dominant[0], dominant[1]))
+        candidates.append(RuleCandidate("domain", domain, dominant[0], dominant[1], domain_totals[domain]))
 
     candidates.sort(key=lambda c: (-c.count, c.kind, c.value))
     return candidates
