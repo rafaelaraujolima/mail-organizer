@@ -5,8 +5,34 @@ from dataclasses import dataclass
 
 # The sender comes from an email header and ends up in a provider filter, so
 # anything that is not a plain address is skipped instead of escaped.
-SENDER_RE = re.compile(r"^[^\s@<>\"',;()\\]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
-DOMAIN_RE = re.compile(r"^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+_DOMAIN = rf"(?:{_LABEL}\.)+[A-Za-z]{{2,}}"
+# Local part: no leading "-" or ".", no trailing ".", no "..".
+_LOCAL = r"(?![-.])(?!.*\.\.)[A-Za-z0-9._%+-]*[A-Za-z0-9_%+-]"
+SENDER_RE = re.compile(rf"{_LOCAL}@{_DOMAIN}")
+DOMAIN_RE = re.compile(_DOMAIN)
+MAX_ADDRESS_LENGTH = 254
+
+# Rules must never move mail into a system label/folder. The list is name-based,
+# so localized provider names (e.g. "Itens Excluídos") are not recognised.
+SYSTEM_FOLDER_NAMES = frozenset({
+    "inbox", "trash", "spam", "sent", "drafts", "draft", "unread", "starred",
+    "important", "chat", "outbox", "junk", "junk email", "junk e-mail",
+    "deleted items", "deleted", "sent items", "sent mail", "bin",
+})
+
+
+def is_system_folder(name: str) -> bool:
+    normalized = (name or "").strip().lower()
+    return normalized in SYSTEM_FOLDER_NAMES or normalized.startswith("category_")
+
+
+def _valid_sender(sender: str) -> bool:
+    return len(sender) <= MAX_ADDRESS_LENGTH and SENDER_RE.fullmatch(sender) is not None
+
+
+def _valid_domain(domain: str) -> bool:
+    return len(domain) <= MAX_ADDRESS_LENGTH and DOMAIN_RE.fullmatch(domain) is not None
 
 
 @dataclass(frozen=True)
@@ -38,8 +64,10 @@ def detect_rule_candidates(
     for proposal in proposals:
         if proposal.get("action") != "move" or not proposal.get("target_folder"):
             continue
+        if is_system_folder(proposal["target_folder"]):
+            continue
         sender = (proposal.get("sender") or "").strip().lower()
-        if not SENDER_RE.match(sender):
+        if not _valid_sender(sender):
             continue
         by_sender[sender][proposal["target_folder"]] += 1
 
@@ -61,7 +89,7 @@ def detect_rule_candidates(
         if sender in covered:
             continue
         domain = sender.split("@", 1)[1]
-        if not DOMAIN_RE.match(domain):
+        if not _valid_domain(domain):
             continue
         by_domain[domain].update(folders)
 

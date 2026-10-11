@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from mail_organizer.providers.base import EmailProvider, RuleCondition
 from mail_organizer.providers.errors import ProviderError
+from mail_organizer.rules import is_system_folder
 
 
 @dataclass
@@ -20,6 +21,10 @@ def _apply_rule(provider: EmailProvider, proposal: dict) -> ApplyResult:
     target_name = proposal.get("target_folder")
     if kind not in ("sender", "domain") or not value or not target_name:
         return ApplyResult(success=False, message="Proposta de regra incompleta")
+    if is_system_folder(target_name):
+        return ApplyResult(
+            success=False, message=f"Regras não podem mover para a pasta de sistema '{target_name}'"
+        )
 
     try:
         folders = provider.list_folders()

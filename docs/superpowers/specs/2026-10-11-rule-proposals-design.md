@@ -162,3 +162,6 @@ the server, tuning the threshold from the UI.
   user-approved, local, single-user MVP; the proposal text shows the exact condition.
 - Rule creation shares the global approval lock with email approvals, so approvals are
   serialized (as today).
+- The system-folder denylist (`rules.SYSTEM_FOLDER_NAMES`, plus any `category_*` name) is
+  name-based, so localized Outlook folder names (for example Portuguese "Itens
+  Excluídos") are not recognised; the human approval is the remaining safeguard.

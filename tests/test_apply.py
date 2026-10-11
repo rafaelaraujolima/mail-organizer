@@ -220,3 +220,24 @@ def test_create_rule_fails_on_incomplete_proposal(overrides):
     assert "incompleta" in result.message
     provider.list_folders.assert_not_called()
     provider.create_rule.assert_not_called()
+
+
+@pytest.mark.parametrize("target", ["Trash", "inbox", "CATEGORY_PROMOTIONS", " Spam "])
+def test_create_rule_refuses_system_folders_before_any_provider_call(target):
+    provider = _rule_provider(folders=[Folder(id="X", name=target)])
+
+    result = apply_proposal(provider, _rule_proposal(target_folder=target))
+
+    assert result.success is False
+    assert "sistema" in result.message
+    provider.list_folders.assert_not_called()
+    provider.create_rule.assert_not_called()
+
+
+def test_create_rule_still_creates_for_a_regular_folder():
+    provider = _rule_provider()
+
+    result = apply_proposal(provider, _rule_proposal(target_folder="Promotions"))
+
+    assert result.success is True
+    provider.create_rule.assert_called_once()

@@ -1,5 +1,7 @@
 # tests/test_rules.py
-from mail_organizer.rules import RuleCandidate, detect_rule_candidates
+import pytest
+
+from mail_organizer.rules import RuleCandidate, detect_rule_candidates, is_system_folder
 
 
 def _move(sender, folder="Promotions", **extra):
@@ -148,3 +150,62 @@ def test_output_is_ordered_by_count_then_kind_then_value():
     result = detect_rule_candidates(proposals, [], threshold=3)
 
     assert [(c.value, c.count) for c in result] == [("a@two.com", 5), ("b@two.com", 3), ("z@one.com", 3)]
+
+
+@pytest.mark.parametrize(
+    "folder", ["TRASH", "Spam", "Deleted Items", "INBOX", "CATEGORY_PROMOTIONS", " trash ", "category_social"]
+)
+def test_moves_to_system_folders_never_become_rule_candidates(folder):
+    proposals = [_move("a@shop.com", folder)] * 3 + [_move("b@news.com", "Promotions")] * 3
+
+    result = detect_rule_candidates(proposals, [], threshold=3)
+
+    # positive control: the same input with a regular folder still yields a rule
+    assert result == [RuleCandidate("sender", "b@news.com", "Promotions", 3)]
+
+
+def test_system_folder_moves_do_not_feed_a_domain_rule():
+    proposals = [_move("a@shop.com", "Trash"), _move("b@shop.com", "Trash"), _move("c@shop.com", "Trash")]
+    assert detect_rule_candidates(proposals, [], threshold=3) == []
+
+    regular = [_move("a@shop.com"), _move("b@shop.com"), _move("c@shop.com")]
+    assert detect_rule_candidates(regular, [], threshold=3) == [
+        RuleCandidate("domain", "shop.com", "Promotions", 3)
+    ]
+
+
+@pytest.mark.parametrize(
+    "name", ["inbox", "INBOX", "Trash", " Spam ", "Sent Items", "Junk E-mail", "Bin", "CATEGORY_UPDATES", "Category_x"]
+)
+def test_is_system_folder_recognises_system_names(name):
+    assert is_system_folder(name) is True
+
+
+@pytest.mark.parametrize("name", ["Promotions", "Newsletters", "Receipts", "categories", "My Trash Can", ""])
+def test_is_system_folder_rejects_regular_names(name):
+    assert is_system_folder(name) is False
+
+
+INVALID_ADDRESSES = [
+    "-a@b.com", ".a@b.com", "a.@b.com", "a..b@c.com", "*@b.com", "a{b}@c.com", "a|b@c.com",
+    "a:b@c.com", "a/b@c.com", "a@b..com", "a@.b.com", "a@-b.com", "a@b-.com", "a@b.c",
+    '"x"@b.com', "a\x00@b.com", "a" * 300 + "@b.com",
+]
+
+
+@pytest.mark.parametrize("address", INVALID_ADDRESSES)
+def test_invalid_addresses_never_produce_a_candidate(address):
+    assert detect_rule_candidates([_move(address)] * 5, [], threshold=3) == []
+
+
+@pytest.mark.parametrize("address", ["news@shop.com", "first.last+tag@sub.shop.co.uk", "a_b%c@shop-1.com"])
+def test_valid_addresses_still_produce_a_candidate(address):
+    result = detect_rule_candidates([_move(address)] * 3, [], threshold=3)
+
+    assert result == [RuleCandidate("sender", address.lower(), "Promotions", 3)]
+
+
+def test_trailing_newline_is_stripped_not_rejected():
+    result = detect_rule_candidates([_move("a@b.com" + chr(10))] * 3, [], threshold=3)
+
+    assert result == [RuleCandidate("sender", "a@b.com", "Promotions", 3)]
