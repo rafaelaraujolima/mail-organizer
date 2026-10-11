@@ -159,7 +159,7 @@ class GmailProvider(EmailProvider):
         sender_pattern = condition.sender or f"*@{condition.domain}"
         body = {
             "criteria": {"from": sender_pattern},
-            "action": {"addLabelIds": [target_folder]},
+            "action": {"addLabelIds": [target_folder], "removeLabelIds": ["INBOX"]},
         }
         result = (
             self._service.users()
