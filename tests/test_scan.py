@@ -180,6 +180,7 @@ def test_run_scan_integrates_with_a_real_database(tmp_path):
             "id": 1, "message_id": "msg-1", "action": "move", "target_folder": "Promotions",
             "reason": "Newsletter", "applied_status": "pending", "applied_error": None,
             "sender": "a@b.com", "subject": "Hi", "date": "2026-01-01", "snippet": "hello snippet",
+            "rule_kind": None, "rule_value": None, "rule_match_count": None,
         }
         job = db.get_job("job-1")
         assert job["status"] == "completed"

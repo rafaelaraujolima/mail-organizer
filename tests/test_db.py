@@ -142,11 +142,13 @@ def test_add_and_list_proposals_roundtrip_in_insertion_order(db):
             "id": 1, "message_id": "msg-1", "action": "move", "target_folder": "Promotions",
             "reason": "Newsletter", "applied_status": "pending", "applied_error": None,
             "sender": "a@b.com", "subject": "Hi", "date": "2026-01-01", "snippet": "preview",
+            "rule_kind": None, "rule_value": None, "rule_match_count": None,
         },
         {
             "id": 2, "message_id": "msg-2", "action": "flag_delete", "target_folder": None,
             "reason": "spf_fail", "applied_status": "pending", "applied_error": None,
             "sender": None, "subject": None, "date": None, "snippet": None,
+            "rule_kind": None, "rule_value": None, "rule_match_count": None,
         },
     ]
 
@@ -173,6 +175,7 @@ def test_get_proposal_returns_full_row_including_job_id(db):
         "target_folder": "Promotions", "reason": "Newsletter",
         "applied_status": "pending", "applied_error": None,
         "sender": "a@b.com", "subject": "Hi", "date": "2026-01-01", "snippet": "preview",
+        "rule_kind": None, "rule_value": None, "rule_match_count": None,
     }
 
 
@@ -232,10 +235,7 @@ def test_mark_proposal_applied_never_touches_an_applied_row(db):
     assert proposal["applied_error"] is None
 
 
-def test_init_schema_raises_for_a_database_created_before_the_new_columns(tmp_path):
-    from mail_organizer.db import SchemaOutOfDateError
-
-    path = tmp_path / "old.db"
+def _old_shape_database(path):
     conn = sqlite3.connect(path)
     conn.executescript(
         """
@@ -245,18 +245,119 @@ def test_init_schema_raises_for_a_database_created_before_the_new_columns(tmp_pa
             processed INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'running', error_message TEXT);
         CREATE TABLE proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
             message_id TEXT NOT NULL, action TEXT NOT NULL, target_folder TEXT, reason TEXT NOT NULL);
+        INSERT INTO accounts VALUES ('acc-1', 'imap', 'old', X'00');
+        INSERT INTO jobs (job_id, account_id, total) VALUES ('job-1', 'acc-1', 1);
+        INSERT INTO proposals (job_id, message_id, action, target_folder, reason)
+            VALUES ('job-1', 'msg-1', 'move', 'Promotions', 'old row');
         """
     )
     conn.commit()
     conn.close()
+
+
+def test_init_schema_migrates_an_old_database_in_place_keeping_its_rows(tmp_path):
+    path = tmp_path / "old.db"
+    _old_shape_database(path)
     key = load_or_create_key(tmp_path / "secret.key")
 
     with Database(path, key) as old:
+        old.init_schema()
+
+        proposal = old.get_proposal(1)
+        assert proposal["message_id"] == "msg-1"
+        assert proposal["applied_status"] == "pending"
+        assert proposal["sender"] is None
+        assert proposal["rule_kind"] is None
+        assert old.get_job("job-1")["folder"] is None
+        assert old.list_applied_rules("acc-1") == []
+
+
+def test_init_schema_migration_is_idempotent(tmp_path):
+    path = tmp_path / "old.db"
+    _old_shape_database(path)
+    key = load_or_create_key(tmp_path / "secret.key")
+
+    with Database(path, key) as old:
+        old.init_schema()
+        old.init_schema()
+
+
+def test_init_schema_raises_schema_out_of_date_when_an_alter_fails(tmp_path):
+    from mail_organizer.db import SchemaOutOfDateError
+
+    path = tmp_path / "old.db"
+    _old_shape_database(path)
+    key = load_or_create_key(tmp_path / "secret.key")
+
+    class _FailingAlter:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, *args):
+            if sql.lstrip().upper().startswith("ALTER TABLE"):
+                raise sqlite3.OperationalError("boom")
+            return self._conn.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    with Database(path, key) as old:
+        old._conn = _FailingAlter(old._conn)
         with pytest.raises(SchemaOutOfDateError) as excinfo:
             old.init_schema()
 
     assert "old.db" in str(excinfo.value)
     assert isinstance(excinfo.value, RuntimeError)
+
+
+def test_rule_proposal_fields_round_trip(db):
+    db.save_account("acc-1", "gmail", "x", {"refresh_token": "t"})
+    db.create_job("job-1", "acc-1", total=0)
+
+    db.add_proposal(
+        "job-1", "", "create_rule", "Promotions", "3 emails",
+        sender="news@shop.com", rule_kind="sender", rule_value="news@shop.com", rule_match_count=3,
+    )
+
+    proposal = db.list_proposals("job-1")[0]
+    assert proposal["action"] == "create_rule"
+    assert proposal["message_id"] == ""
+    assert proposal["rule_kind"] == "sender"
+    assert proposal["rule_value"] == "news@shop.com"
+    assert proposal["rule_match_count"] == 3
+    assert db.get_proposal(proposal["id"])["rule_value"] == "news@shop.com"
+
+
+def test_applied_rules_add_and_list_in_insertion_order(db):
+    db.save_account("acc-1", "gmail", "x", {"refresh_token": "t"})
+
+    db.add_applied_rule("acc-1", "sender", "a@shop.com", "Promotions", "rule-1")
+    db.add_applied_rule("acc-1", "domain", "other.com", "Updates", None)
+
+    assert db.list_applied_rules("acc-1") == [
+        {"kind": "sender", "value": "a@shop.com", "folder": "Promotions", "provider_rule_id": "rule-1"},
+        {"kind": "domain", "value": "other.com", "folder": "Updates", "provider_rule_id": None},
+    ]
+
+
+def test_applied_rules_are_scoped_to_the_account(db):
+    db.save_account("acc-1", "gmail", "x", {"refresh_token": "t"})
+    db.save_account("acc-2", "gmail", "y", {"refresh_token": "t"})
+
+    db.add_applied_rule("acc-1", "sender", "a@shop.com", "Promotions", "rule-1")
+
+    assert db.list_applied_rules("acc-2") == []
+
+
+def test_add_applied_rule_is_idempotent_on_account_kind_value(db):
+    db.save_account("acc-1", "gmail", "x", {"refresh_token": "t"})
+
+    db.add_applied_rule("acc-1", "sender", "a@shop.com", "Promotions", "rule-1")
+    db.add_applied_rule("acc-1", "sender", "a@shop.com", "Updates", "rule-2")
+
+    rules = db.list_applied_rules("acc-1")
+    assert len(rules) == 1
+    assert rules[0]["folder"] == "Promotions"
 
 
 def test_init_schema_accepts_a_fresh_database(tmp_path):
