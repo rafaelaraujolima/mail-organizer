@@ -1,7 +1,7 @@
 # Rule Proposals — Design
 
 Date: 2026-10-11
-Status: Awaiting review (written 2026-10-11)
+Status: Approved (implemented)
 
 References: `docs/superpowers/specs/2026-09-21-mail-organizer-design.md` (product spec,
 rule detection described in the scan flow and in the apply step),
