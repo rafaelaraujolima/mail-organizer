@@ -147,8 +147,8 @@ git push origin feature/your-feature
 1. ✅ General design specification
 2. ✅ Connectors & persistence plan → Implemented
 3. ✅ Scan engine plan → Implemented
-4. 🔄 API + frontend plan → Ready for implementation (subagent-driven)
-5. ⏳ Rules proposal plan (future)
+4. ✅ API + frontend plan → Implemented
+5. ✅ Rule proposals plan → Implemented (`docs/superpowers/plans/2026-10-11-rule-proposals.md`)
 
 ## License
 

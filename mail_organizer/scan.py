@@ -1,9 +1,28 @@
+import logging
+
 from mail_organizer.db import Database
 from mail_organizer.heuristics import analyze_message
 from mail_organizer.llm import ClassificationResult, OllamaClient, OllamaUnavailableError
 from mail_organizer.proposals import build_proposal
 from mail_organizer.providers.base import EmailProvider, Message
 from mail_organizer.providers.errors import ProviderError
+from mail_organizer.rules import detect_rule_candidates
+
+logger = logging.getLogger(__name__)
+
+
+def _propose_rules(db: Database, provider: EmailProvider, job_id: str, threshold: int) -> None:
+    if not provider.supports_rules():
+        return
+    account_id = db.get_job(job_id)["account_id"]
+    existing = [(rule["kind"], rule["value"]) for rule in db.list_applied_rules(account_id)]
+    for candidate in detect_rule_candidates(db.list_proposals(job_id), existing, threshold):
+        db.add_proposal(
+            job_id, "", "create_rule", candidate.folder,
+            f"{candidate.count} de {candidate.total} emails deste lote vão para {candidate.folder}",
+            sender=candidate.value, rule_kind=candidate.kind,
+            rule_value=candidate.value, rule_match_count=candidate.count,
+        )
 
 
 def run_scan(
@@ -12,6 +31,7 @@ def run_scan(
     llm_client: OllamaClient,
     job_id: str,
     messages: list[Message],
+    rule_threshold: int = 3,
 ) -> None:
     # Everything below is wrapped in a backstop: no exception -- anticipated
     # or not -- should ever be able to leave run_scan without db.mark_job_failed
@@ -59,10 +79,20 @@ def run_scan(
                     # Recording the failure itself failed (e.g. transient DB error).
                     # Swallow it so the scan keeps going and still reaches
                     # "completed" below, instead of leaving the job stuck "running".
-                    pass
+                    logger.warning(
+                        "Could not record the error proposal for message %s of job %s",
+                        message.id, job_id, exc_info=True,
+                    )
             finally:
                 processed += 1
                 db.update_job_progress(job_id, processed, "running")
+
+        try:
+            _propose_rules(db, provider, job_id, rule_threshold)
+        except Exception:
+            # Rule proposals are an extra: a failure here must never turn a
+            # finished scan into a failed one.
+            logger.warning("Rule detection failed for job %s", job_id, exc_info=True)
 
         db.update_job_progress(job_id, processed, "completed")
     except Exception as exc:

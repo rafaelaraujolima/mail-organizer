@@ -228,7 +228,7 @@ def test_create_rule_with_sender_condition_calls_filters_create():
         userId="me",
         body={
             "criteria": {"from": "a@b.com"},
-            "action": {"addLabelIds": ["Promotions"]},
+            "action": {"addLabelIds": ["Promotions"], "removeLabelIds": ["INBOX"]},
         },
     )
 
@@ -246,7 +246,7 @@ def test_create_rule_with_domain_condition_uses_wildcard():
         userId="me",
         body={
             "criteria": {"from": "*@newsletter.com"},
-            "action": {"addLabelIds": ["Promotions"]},
+            "action": {"addLabelIds": ["Promotions"], "removeLabelIds": ["INBOX"]},
         },
     )
 

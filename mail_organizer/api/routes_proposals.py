@@ -1,3 +1,4 @@
+import logging
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,6 +10,8 @@ from mail_organizer.apply import apply_proposal
 from mail_organizer.db import Database
 from mail_organizer.providers.errors import ProviderError
 from mail_organizer.sanitize import sanitize_html
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["proposals"])
 
@@ -28,6 +31,18 @@ def _open_provider(service: AccountService, job: dict):
 
 def _apply_and_record(db: Database, service: AccountService, proposal: dict) -> dict:
     job = db.get_job(proposal["job_id"])
+
+    if proposal["action"] == "create_rule":
+        # Runs under _APPLY_LOCK and before any provider call: an equivalent rule
+        # already exists (or was created and only its bookkeeping failed), and a
+        # second one would be a duplicate or conflicting server-side filter.
+        wanted = (proposal["rule_kind"], (proposal["rule_value"] or "").lower())
+        for existing in db.list_applied_rules(job["account_id"]):
+            if (existing["kind"], existing["value"].lower()) == wanted:
+                message = f"Já existe uma regra para {proposal['rule_value']} (pasta {existing['folder']})"
+                db.mark_proposal_applied(proposal["id"], "pending", message)
+                return {"success": False, "message": message}
+
     try:
         provider = _open_provider(service, job)
     except (LookupError, ValueError, ProviderError, OSError) as exc:
@@ -47,6 +62,19 @@ def _apply_and_record(db: Database, service: AccountService, proposal: dict) -> 
         message = f"Erro inesperado ao aplicar: {exc}"
         db.mark_proposal_applied(proposal["id"], "pending", message)
         return {"success": False, "message": message}
+
+    if result.success and proposal["action"] == "create_rule":
+        try:
+            db.add_applied_rule(
+                job["account_id"], proposal["rule_kind"], proposal["rule_value"],
+                proposal["target_folder"], result.rule_id,
+            )
+        except Exception:
+            # The rule already exists on the server. A bookkeeping failure must
+            # not leave the proposal retryable: a retry would create a duplicate.
+            logger.warning(
+                "Rule created but not recorded locally for proposal %s", proposal["id"], exc_info=True
+            )
 
     db.mark_proposal_applied(
         proposal["id"],

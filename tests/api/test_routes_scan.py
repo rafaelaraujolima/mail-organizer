@@ -99,3 +99,42 @@ def test_start_scan_persists_the_scanned_folder_on_the_job(client, db, monkeypat
     response = client.post("/scan", json={"account_id": "acc-1", "folder": "INBOX", "filters": {}})
 
     assert db.get_job(response.json()["job_id"])["folder"] == "INBOX"
+
+
+def test_start_scan_passes_the_configured_rule_threshold(db, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from fastapi.testclient import TestClient
+
+    from mail_organizer.api.app import CSRF_HEADER, CSRF_HEADER_VALUE, create_app
+    from mail_organizer.providers.base import EmailProvider, Folder
+
+    class _Provider(EmailProvider):
+        def __init__(self, credentials):
+            pass
+
+        def list_folders(self):
+            return [Folder(id="INBOX", name="INBOX")]
+
+        def list_messages(self, folder, filters):
+            return []
+
+        def get_message(self, message_id):
+            raise NotImplementedError
+
+        def move_message(self, message_id, target_folder):
+            pass
+
+        def delete_message(self, message_id):
+            pass
+
+    spy = MagicMock()
+    monkeypatch.setattr("mail_organizer.api.routes_scan.run_scan", spy)
+    db.save_account("acc-1", "fake", "x", {})
+    app = create_app(db, {"fake": _Provider}, rule_min_emails=7)
+    client = TestClient(app, headers={CSRF_HEADER: CSRF_HEADER_VALUE})
+
+    response = client.post("/scan", json={"account_id": "acc-1", "folder": "INBOX", "filters": {}})
+
+    assert response.status_code == 201
+    assert spy.call_args.kwargs["rule_threshold"] == 7

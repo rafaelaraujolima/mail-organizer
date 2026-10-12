@@ -4,7 +4,10 @@ import requests
 
 GMAIL_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GMAIL_TOKEN_URL = "https://oauth2.googleapis.com/token"
-GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
+GMAIL_SCOPE = (
+    "https://www.googleapis.com/auth/gmail.modify "
+    "https://www.googleapis.com/auth/gmail.settings.basic"
+)
 
 GRAPH_AUTH_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
 GRAPH_TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"

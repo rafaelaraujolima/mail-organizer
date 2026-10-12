@@ -37,24 +37,50 @@ CREATE TABLE IF NOT EXISTS proposals (
     snippet TEXT,
     applied_status TEXT NOT NULL DEFAULT 'pending',
     applied_error TEXT,
+    rule_kind TEXT,
+    rule_value TEXT,
+    rule_match_count INTEGER,
     FOREIGN KEY (job_id) REFERENCES jobs (job_id)
+);
+
+CREATE TABLE IF NOT EXISTS applied_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    value TEXT NOT NULL,
+    folder TEXT NOT NULL,
+    provider_rule_id TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (account_id, kind, value),
+    FOREIGN KEY (account_id) REFERENCES accounts (account_id)
 );
 """
 
 
-EXPECTED_COLUMNS = {
+# Columns added after the first schema version. CREATE TABLE IF NOT EXISTS leaves
+# existing tables untouched, so init_schema adds whatever is missing (additive
+# only; there is no migration framework, ADR-0003).
+ADDED_COLUMNS = {
     "jobs": {
-        "job_id", "account_id", "total", "processed", "status", "error_message", "folder",
+        "error_message": "TEXT",
+        "folder": "TEXT",
     },
     "proposals": {
-        "id", "job_id", "message_id", "action", "target_folder", "reason",
-        "sender", "subject", "date", "snippet", "applied_status", "applied_error",
+        "sender": "TEXT",
+        "subject": "TEXT",
+        "date": "TEXT",
+        "snippet": "TEXT",
+        "applied_status": "TEXT NOT NULL DEFAULT 'pending'",
+        "applied_error": "TEXT",
+        "rule_kind": "TEXT",
+        "rule_value": "TEXT",
+        "rule_match_count": "INTEGER",
     },
 }
 
 
 class SchemaOutOfDateError(RuntimeError):
-    """The database file was created by an older version of the schema."""
+    """The database file is from an older schema version and could not be migrated."""
 
 
 class Database:
@@ -69,16 +95,19 @@ class Database:
 
     def init_schema(self) -> None:
         self._conn.executescript(SCHEMA)
-        # CREATE TABLE IF NOT EXISTS leaves old tables untouched (no migrations, ADR-0003):
-        # fail clearly instead of with an opaque "no such column" at request time.
-        for table, expected in EXPECTED_COLUMNS.items():
+        for table, columns in ADDED_COLUMNS.items():
             actual = {row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})")}
-            if expected - actual:
-                raise SchemaOutOfDateError(
-                    f"O banco de dados '{self._path}' foi criado por uma versão anterior "
-                    f"(tabela '{table}' sem as colunas: {', '.join(sorted(expected - actual))}). "
-                    "Apague o arquivo ou mova-o para outro lugar e inicie de novo."
-                )
+            for name, ddl in columns.items():
+                if name in actual:
+                    continue
+                try:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+                except sqlite3.OperationalError as exc:
+                    raise SchemaOutOfDateError(
+                        f"O banco de dados '{self._path}' é de uma versão anterior e não pôde ser "
+                        f"atualizado (tabela '{table}', coluna '{name}'). "
+                        "Apague o arquivo ou mova-o para outro lugar e inicie de novo."
+                    ) from exc
         # Per-connection pragma: SQLite ignores declared FKs unless this is on.
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.commit()
@@ -172,15 +201,20 @@ class Database:
         subject: str | None = None,
         date: str | None = None,
         snippet: str | None = None,
+        rule_kind: str | None = None,
+        rule_value: str | None = None,
+        rule_match_count: int | None = None,
     ) -> None:
         with self._lock:
             self._conn.execute(
                 """
                 INSERT INTO proposals
-                    (job_id, message_id, action, target_folder, reason, sender, subject, date, snippet)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (job_id, message_id, action, target_folder, reason, sender, subject, date, snippet,
+                     rule_kind, rule_value, rule_match_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (job_id, message_id, action, target_folder, reason, sender, subject, date, snippet),
+                (job_id, message_id, action, target_folder, reason, sender, subject, date, snippet,
+                 rule_kind, rule_value, rule_match_count),
             )
             self._conn.commit()
 
@@ -188,7 +222,7 @@ class Database:
         rows = self._conn.execute(
             """
             SELECT id, message_id, action, target_folder, reason, applied_status, applied_error,
-                   sender, subject, date, snippet
+                   sender, subject, date, snippet, rule_kind, rule_value, rule_match_count
             FROM proposals WHERE job_id = ? ORDER BY id
             """,
             (job_id,),
@@ -199,7 +233,7 @@ class Database:
         row = self._conn.execute(
             """
             SELECT id, job_id, message_id, action, target_folder, reason, applied_status, applied_error,
-                   sender, subject, date, snippet
+                   sender, subject, date, snippet, rule_kind, rule_value, rule_match_count
             FROM proposals WHERE id = ?
             """,
             (proposal_id,),
@@ -214,3 +248,31 @@ class Database:
                 (status, error, proposal_id),
             )
             self._conn.commit()
+
+    def add_applied_rule(
+        self,
+        account_id: str,
+        kind: str,
+        value: str,
+        folder: str,
+        provider_rule_id: str | None = None,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT OR IGNORE INTO applied_rules (account_id, kind, value, folder, provider_rule_id)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (account_id, kind, value, folder, provider_rule_id),
+            )
+            self._conn.commit()
+
+    def list_applied_rules(self, account_id: str) -> list[dict]:
+        rows = self._conn.execute(
+            """
+            SELECT kind, value, folder, provider_rule_id
+            FROM applied_rules WHERE account_id = ? ORDER BY id
+            """,
+            (account_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]

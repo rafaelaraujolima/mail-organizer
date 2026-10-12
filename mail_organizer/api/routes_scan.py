@@ -46,7 +46,10 @@ def start_scan(
     llm_client = OllamaClient(
         requests.Session(), base_url=request.app.state.ollama_base_url, model=request.app.state.ollama_model
     )
-    background_tasks.add_task(run_scan, db, provider, llm_client, job_id, messages)
+    background_tasks.add_task(
+        run_scan, db, provider, llm_client, job_id, messages,
+        rule_threshold=request.app.state.rule_min_emails,
+    )
 
     return {"job_id": job_id, "total": len(messages)}
 

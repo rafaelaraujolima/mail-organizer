@@ -22,6 +22,7 @@ def create_app(
     ollama_model: str = "llama3.2:3b",
     static_dir=None,
     allowed_hosts: list[str] | None = None,
+    rule_min_emails: int = 3,
 ) -> FastAPI:
     app = FastAPI(title="Mail Organizer")
     app.state.db = db
@@ -30,6 +31,7 @@ def create_app(
     app.state.ollama_base_url = ollama_base_url
     app.state.ollama_model = ollama_model
     app.state.oauth_states = set()
+    app.state.rule_min_emails = rule_min_emails
 
     @app.middleware("http")
     async def require_csrf_header(request: Request, call_next):
