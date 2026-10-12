@@ -16,10 +16,11 @@ Intelligent email organization tool with support for Gmail, Outlook, and IMAP. C
 ### Backend
 - **Python 3.12+** with FastAPI + uvicorn
 - **SQLite local** for persistence of jobs, proposals, and accounts
-- **Three implemented subsystems:**
+- **Four subsystems, all implemented:**
   1. **Connectors** — unified interface for Gmail, Graph (Outlook), IMAP
   2. **Scan Engine** — security heuristics + LLM classification
-  3. **API + Frontend** — in development, local REST API + vanilla HTML/JS
+  3. **API + Frontend** — local REST API + vanilla HTML/JS (connect, scan, review, approve)
+  4. **Rule proposals** — suggests server-side rules (Gmail/Graph) for repeated sender → folder patterns
 
 ### Frontend
 - Vanilla HTML/JS served by FastAPI (no heavy framework)
@@ -35,7 +36,7 @@ Intelligent email organization tool with support for Gmail, Outlook, and IMAP. C
 ### Prerequisites
 - Python 3.12 or higher
 - Ollama installed with `llama3.2:3b` (or configure your own model)
-- For Gmail/Outlook: OAuth app registered (see [ADR-0009](docs/adr/0009-oauth-manual-com-refresh-token.md))
+- For Gmail/Outlook: OAuth app registered (see [ADR-0009](docs/adr/0009-oauth2-with-refresh-token.md))
 
 ### Installation
 ```bash
@@ -60,26 +61,44 @@ uvicorn mail_organizer.api.main:app --reload
 # Open http://localhost:8000 in your browser
 ```
 
+### Configuration
+
+All configuration is by environment variable; every variable is optional.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MAIL_ORGANIZER_DATA_DIR` | `~/.mail-organizer` | Directory holding `app.db` and `secret.key` |
+| `APP_BASE_URL` | `http://localhost:8000` | Used to build OAuth redirect URIs and the allowed Host list; register the printed redirect URIs with the provider |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` | unset | Enable Gmail (both required) |
+| `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET` | unset | Enable Outlook / Microsoft Graph (both required) |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Local LLM endpoint |
+| `OLLAMA_MODEL` | `llama3.2:3b` | Model used for classification |
+| `RULE_MIN_EMAILS` | `3` | Emails from one sender/domain to one folder before a rule is proposed (integer >= 1) |
+
+Gmail rule creation needs the `gmail.settings.basic` scope; accounts connected before it
+was requested must be reconnected. See [ADR-0009](docs/adr/0009-oauth2-with-refresh-token.md)
+and [ADR-0013](docs/adr/0013-local-api-hardening.md).
+
 ## Architecture Decision Records
 
 All architectural decisions are documented in [docs/adr/](docs/adr/):
 
-- [ADR-0002](docs/adr/0002-python-3-12-ou-superior.md) — Python 3.12+ minimum version
-- [ADR-0003](docs/adr/0003-sqlite-como-banco-local.md) — SQLite local, no ORM
-- [ADR-0004](docs/adr/0004-criptografia-de-credenciais-com-fernet.md) — Credentials encrypted with Fernet
-- [ADR-0005](docs/adr/0005-fastapi-e-uvicorn-para-a-api.md) — FastAPI + uvicorn + BackgroundTasks
-- [ADR-0007](docs/adr/0007-llm-local-com-ollama.md) — Local LLM via Ollama
-- [ADR-0012](docs/adr/0012-nada-e-executado-sem-aprovacao.md) — Nothing executes without explicit approval
+- [ADR-0002](docs/adr/0002-python-3-12-minimum.md) — Python 3.12+ minimum version
+- [ADR-0003](docs/adr/0003-sqlite-local-database.md) — SQLite local, no ORM, additive migrations
+- [ADR-0004](docs/adr/0004-credentials-encryption-with-fernet.md) — Credentials encrypted with Fernet
+- [ADR-0005](docs/adr/0005-fastapi-and-uvicorn.md) — FastAPI + uvicorn + BackgroundTasks
+- [ADR-0007](docs/adr/0007-local-llm-via-ollama.md) — Local LLM via Ollama
+- [ADR-0012](docs/adr/0012-nothing-executes-without-approval.md) — Nothing executes without explicit approval
+- [ADR-0013](docs/adr/0013-local-api-hardening.md) — Local API hardening
 
-See all 12 ADRs in [docs/adr/README.md](docs/adr/README.md).
+See all ADRs in [docs/adr/README.md](docs/adr/README.md).
 
-## Implementation Plans
+## Project State and Plans
 
-Each subsystem has a detailed implementation plan:
-
-1. **Connectors & Persistence** — [docs/superpowers/plans/2026-09-21-connectors-and-persistence.md](docs/superpowers/plans/2026-09-21-connectors-and-persistence.md) ✅ Implemented
-2. **Scan Engine** — [docs/superpowers/plans/2026-09-21-scan-engine-heuristics-llm.md](docs/superpowers/plans/2026-09-21-scan-engine-heuristics-llm.md) ✅ Implemented
-3. **API + Frontend** — [docs/superpowers/plans/2026-09-22-api-frontend.md](docs/superpowers/plans/2026-09-22-api-frontend.md) 🔄 Ready for implementation
+Where the project stands, what is next and the open backlog are in
+[docs/STATUS.md](docs/STATUS.md) and [docs/BACKLOG.md](docs/BACKLOG.md). Specs live in
+`docs/superpowers/specs/`, implementation plans in `docs/superpowers/plans/`, and the
+documentation index is [docs/README.md](docs/README.md).
 
 ## Project Structure
 
@@ -90,9 +109,12 @@ mail-organizer/
 │   ├── providers/        # Connectors: Gmail, Graph, IMAP
 │   ├── heuristics.py     # Security analysis (SPF/DKIM, domain-mismatch, links)
 │   ├── llm.py            # Ollama client
-│   ├── scan.py           # Scan orchestration
+│   ├── scan.py           # Scan orchestration (also generates rule proposals)
 │   ├── proposals.py      # Proposal logic
-│   ├── apply.py          # Application of approved proposals
+│   ├── rules.py          # Pure rule-candidate detection
+│   ├── apply.py          # Application of approved proposals (move, delete, create rule)
+│   ├── oauth.py          # OAuth2 authorize URLs and code exchange
+│   ├── factories.py      # Provider factories (refresh token -> access token)
 │   ├── sanitize.py       # HTML sanitization
 │   ├── db.py             # SQLite persistence
 │   ├── crypto.py         # Credential encryption
@@ -100,8 +122,12 @@ mail-organizer/
 │   └── static/           # Frontend (HTML/JS/CSS)
 ├── tests/                # pytest test suite
 ├── docs/
+│   ├── STATUS.md         # Current state and next steps (start here)
+│   ├── BACKLOG.md        # Open follow-ups and known risks
+│   ├── decisions/        # Development rulings log
 │   ├── adr/              # Architecture Decision Records
 │   └── superpowers/      # Specifications and implementation plans
+├── CLAUDE.md             # Instructions loaded automatically by Claude Code
 ├── pyproject.toml
 └── README.md
 ```
@@ -144,11 +170,11 @@ git push origin feature/your-feature
 
 ## Implementation Status
 
-1. ✅ General design specification
-2. ✅ Connectors & persistence plan → Implemented
-3. ✅ Scan engine plan → Implemented
-4. ✅ API + frontend plan → Implemented
-5. ✅ Rule proposals plan → Implemented (`docs/superpowers/plans/2026-10-11-rule-proposals.md`)
+All four planned subsystems are implemented and merged (see
+[docs/STATUS.md](docs/STATUS.md) for the phase table). The remaining work is validating
+the app against real mail accounts and the open backlog in
+[docs/BACKLOG.md](docs/BACKLOG.md); the frontend has not yet been run through the manual
+browser checklist.
 
 ## License
 
@@ -157,8 +183,3 @@ MIT
 ## Contact
 
 Rafael Lima (rafael.araujo.lima@outlook.com)
-
----
-
-**Last updated:** 2026-09-26  
-**MVP Status:** Connectors and scan engine implemented; API + frontend in planning
