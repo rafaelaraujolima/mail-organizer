@@ -54,10 +54,11 @@ implemented and merged. What remains is validation against real accounts and the
 
 ## Immediate next steps (in order)
 
-1. **Run the manual browser checklist** (never done): connect an IMAP account, scan,
-   preview content, approve/reject, batch approve, double-click approve, failed approve then
-   retry, grouped view with rule proposals.
-2. **Validate against real providers** with a throwaway mailbox: Gmail (reconnect to grant
+1. **Run the manual checklist** in [MANUAL-TESTING.md](MANUAL-TESTING.md) (never done):
+   IMAP connect, scan, preview, approve/reject, batch, double-click, failed approve then
+   retry, grouped view. Record the outcome in its Results table.
+2. **Validate against real providers** (sections 5-7 of the same checklist) with a throwaway
+   mailbox: Gmail (reconnect to grant
    `gmail.settings.basic`, create a filter, confirm it labels and archives) and Graph
    (create a rule, confirm the condition and the target folder).
 3. **Sync stale spec text:** `docs/superpowers/specs/2026-10-11-rule-proposals-design.md`
