@@ -9,7 +9,7 @@ Priority: **P1** = do before trusting the app with a real mailbox, **P2** = soon
 
 | Item | Source | Notes |
 |---|---|---|
-| Browser checklist never run for the frontend (connect, scan, preview, approve/reject, batch, rules group) | PR #4, PR #5 | UI verified only by `node --check`, grep for `innerHTML` and `TestClient` static checks |
+| Manual checklist ([MANUAL-TESTING.md](MANUAL-TESTING.md)) never run for the frontend (connect, scan, preview, approve/reject, batch, rules group) | PR #4, PR #5 | UI verified only by `node --check`, grep for `innerHTML` and `TestClient` static checks |
 | Gmail filters and Graph message rules never created against the real APIs | PR #5 review | All provider tests use mocks (ADR-0011). Gmail needs `gmail.settings.basic`; accounts connected earlier must reconnect |
 | Gmail domain rule uses `from: *@domain`; wildcard syntax unconfirmed | PR #5 review | Fails safe (matches nothing) but may not work; `@domain` is the documented form |
 | `mark_proposal_applied` is unguarded right after a successful `create_rule` | PR #5 review | Only a disk/I-O failure triggers it; the "rule already exists" pre-check prevents a duplicate on retry, but the proposal stays `pending` |
