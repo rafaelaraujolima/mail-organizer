@@ -3,6 +3,7 @@
 | Document | Purpose |
 |---|---|
 | [STATUS.md](STATUS.md) | **Start here.** Where the project is, what is next, how to resume |
+| [MANUAL-TESTING.md](MANUAL-TESTING.md) | Manual checklist for the UI and real providers, with a results table |
 | [BACKLOG.md](BACKLOG.md) | Open follow-ups, known risks, unvalidated areas, with priority and source |
 | [decisions/development-rulings.md](decisions/development-rulings.md) | Process and scope judgment calls made during development, with rationale |
 | [adr/README.md](adr/README.md) | Architecture Decision Records (technology and architecture choices) |
